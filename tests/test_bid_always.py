@@ -44,3 +44,34 @@ class TestBidAlways(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestBidsOnlyFollowsPrefer(unittest.TestCase):
+    """Round 47: a bids-only lane pre-picked the 'balanced' airline on a CHEAPEST request (Fjordline 2604) instead
+    of the cheapest (Nova Atlas 1833) -> too_high. Now every bid becomes an option and finalize picks by the wish."""
+    def _lane(self, tid, prefer):
+        import time, json as J
+        db.con().execute("DELETE FROM bids WHERE thread_id=?", (tid,))
+        db.con().execute("INSERT OR REPLACE INTO sessions(thread_id,customer,status,fields,options,received_at) VALUES(?,?,?,?,?,?)",
+                         (tid, "c@x.mail", "waiting_bids", J.dumps({"origin": "STR", "destination": "EZE", "weight_kg_total": 485, "prefer": prefer}), "[]", time.time()))
+        bids.ensure()
+        for carrier, total, days in (("Nova Atlas Cargo", "1833.66", 7), ("Aurelia Air Cargo", "2408.21", 6), ("Fjordline Air Cargo", "2603.80", 4)):
+            db.con().execute("INSERT INTO bids(thread_id,carrier,kind,email,role,required,status,requested_at,replied_at,total,currency,transit_days,total_eur) "
+                             "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (tid, carrier, "airline", carrier.lower().replace(" ", "-") + "@x", "airline", 1, "ok", time.time(), time.time(), total, "EUR", days, total))
+
+    def test_cheapest_request_takes_the_cheapest_bid(self):
+        import random, json as J
+        tid = random.randint(900000, 909999)
+        self._lane(tid, "cheapest")
+        opts = bids.final_options(tid, J.loads(db.session(tid)["options"]))
+        best = min(opts, key=lambda x: float(x["total_eur"]))
+        self.assertEqual(best["airline"], "Nova Atlas Cargo")        # cheapest, not the balanced Fjordline
+        self.assertEqual(len(opts), 3)                                # all three bids are options, not one pre-pick
+
+    def test_fastest_request_can_still_take_the_fastest(self):
+        import random, json as J
+        tid = random.randint(910000, 919999)
+        self._lane(tid, "fastest")
+        opts = bids.final_options(tid, J.loads(db.session(tid)["options"]))
+        best = min(opts, key=lambda x: (x["transit_days"], float(x["total_eur"])))
+        self.assertEqual(best["airline"], "Fjordline Air Cargo")      # 4 days, the fastest
