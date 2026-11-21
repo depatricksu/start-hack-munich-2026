@@ -26,7 +26,8 @@ NAME_AFTER = re.compile(r"\bUN\s?-?\d{4}\b[\s,;:/-]*(?:(?:class|klasse)\s*[:.]?\
 DECLARES = re.compile(r"dangerous goods\s*[:=][ \t]*(?=\S)(?!no\b|none\b|n/?a\b|-)|gefahrgut\s*[:=][ \t]*(?=\S)(?!nein\b|keine?\b)"
                       r"|\bDGR\b|\bhazmat\b"
                       r"|\bUN\s?-?\d{4}\b", re.I)
-NOT_DG = re.compile(r"\b(?:non[- ]?dangerous|not dangerous|no dangerous goods|kein gefahrgut|nicht gef[aä]hrlich)\b", re.I)
+NOT_DG = re.compile(r"\b(?:non[- ]?dangerous|not dangerous|no dangerous goods|no dg|non[- ]?dg|no dgr|non[- ]?dgr|no hazmat|"
+                    r"not hazardous|non[- ]?hazardous|kein gefahrgut|nicht gef[aä]hrlich)\b", re.I)
 
 
 def mode():

@@ -121,8 +121,7 @@ def check_mail(mail):
         found = scan_attachments(files)
         if found:
             return found
-        body = mail.get("body") or ""
-        info = read_declaration(body) if re.search(r"\bUN\s?-?\d{4}\b", body, re.I) else None
+        info = read_declaration(mail.get("body") or "")       # a denial ("no dangerous goods") is not DG
         return dict(info, file="mail body") if info else None
     except Exception:
         return None

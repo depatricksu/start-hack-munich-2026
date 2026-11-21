@@ -25,6 +25,12 @@ class ReadDeclaration(unittest.TestCase):
         self.assertIsNone(dg.read_declaration("Dangerous goods: no"))
         self.assertIsNone(dg.read_declaration(""))
 
+    def test_denials_in_a_mail(self):
+        for text in ("Spray cans, no dangerous goods.", "Industrial adhesives, non-DGR, general cargo",
+                     "kein Gefahrgut", "non-hazardous chemicals"):
+            self.assertIsNone(dg.read_declaration(text), text)
+        self.assertEqual(dg.read_declaration("Dangerous goods: Class 3 adhesives")["class"], "3")
+
     def test_un_number_wins_over_a_non_dangerous_claim(self):
         self.assertEqual(dg.read_declaration("non-dangerous ... UN 3480 lithium")["un"], "UN3480")
 
@@ -106,6 +112,7 @@ class Attachments(unittest.TestCase):
         self.assertEqual(dg.check_mail(mail)["un"], "UN1950")
         self.assertIsNone(dg.check_mail({"id": 2, "body": "General cargo, non-dangerous.", "attachments": []}))
         self.assertIsNone(dg.check_mail({"id": 3, "body": "x", "attachments": [{"filename": "a.pdf"}]}))   # no id, no bytes
+        self.assertEqual(dg.check_mail({"id": 4, "body": "Hazmat, Class 9 lithium batteries", "attachments": []})["class"], "9")
 
     def test_clean_files_and_garbage_give_none(self):
         self.assertIsNone(dg.scan_attachments([("note.txt", b"General cargo, non-dangerous")]))
