@@ -47,9 +47,18 @@ def shipment(f):
     pieces_kg = sum((p.get("count") or 1) * (p.get("kg_each") or 0) for p in pieces)
     pieces_cbm = sum((p.get("count") or 1) * (p.get("l_cm") or 0) * (p.get("w_cm") or 0) * (p.get("h_cm") or 0)
                      for p in pieces) / 1e6
-    weight = float(f.get("weight_kg") or 0) + pieces_kg
-    volume = float(f.get("volume_cbm") or 0) + pieces_cbm
+    weight = _total(float(f.get("weight_kg") or 0), pieces_kg)
+    volume = _total(float(f.get("volume_cbm") or 0), pieces_cbm)
     return float(weight or 0), float(volume or 0)
+
+
+def _total(stated, from_pieces):
+    """The model often gives the SAME total twice: 'weight_kg': 676 and pieces 12 x 56.33 kg (= 676). That is one
+    shipment, not two lots: adding them doubled the weight (real requests 268, 1631, 5246 -> priced as 1,352 kg,
+    rejected too high). Equal within 2 % -> one total. Different -> separate lots, add them (round 9). (Riky)"""
+    if stated and from_pieces and abs(stated - from_pieces) <= 0.02 * max(stated, from_pieces):
+        return stated
+    return stated + from_pieces
 
 
 def handle_rfq(mail):
