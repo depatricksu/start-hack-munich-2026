@@ -379,5 +379,44 @@ class TestLookalikeYesNo(unittest.TestCase):
             self.assertEqual(classify(t), "unclear", t)
 
 
+class TestRound9(unittest.TestCase):
+    """Red-team round 9: the answer to our question as an attached file; a customer mail with 'Booking BK-...'."""
+    def test_clarify_reads_the_attached_answer(self):
+        import json
+        from unittest import mock
+        from core import db, mailbox
+        from llm import clarify
+        tid = 9860000
+        m = mailbox.normalize({"id": tid, "from": "sara@lindqvist-medtech.mail", "subject": "Air freight quote to EZE",
+                               "body": "cheapest to EZE, 1805 kg, truck pickup from our warehouse"})
+        db.save_mail(m); db.new_session(m)
+        db.update_session(tid, status="asked_customer", customer="sara@lindqvist-medtech.mail",
+                          fields={"destination": "EZE", "weight_kg": 1805, "volume_cbm": 6.92})
+        seen = []
+        def spy(fields, text):
+            seen.append(text)
+            return "other", {}, {}
+        ans = mailbox.normalize({"id": tid + 1, "from": "sara@lindqvist-medtech.mail", "subject": "Re: Air freight quote to EZE",
+                                 "body": "Please find the pickup address attached.", "in_reply_to": tid, "references": [tid]})
+        ans["attachments_text"] = [{"filename": "pickup.txt", "text": "Pickup: Industriestr. 4, 72146 Tuebingen", "readable": True}]
+        with mock.patch.object(clarify, "_merge_call", spy):
+            clarify.answer(ans)
+        self.assertIn("72146", seen[0])
+
+    def test_customer_mail_with_booking_ref_reaches_the_booking(self):
+        from core import db, mailbox
+        from booking import crm, handlers
+        tid = 9860100
+        m = mailbox.normalize({"id": tid, "from": "sara@lindqvist-medtech.mail", "subject": "Air freight FRA-ORD", "body": "x"})
+        db.save_mail(m); db.new_session(m)
+        db.update_session(tid, status="booked", customer="sara@lindqvist-medtech.mail")
+        crm.upsert(tid, customer="sara@lindqvist-medtech.mail", subject="Air freight FRA-ORD", last_customer_mail_id=tid,
+                   airline="Meridian Freightways", origin="FRA", destination="ORD", status="booked", booking_reference="BK-CUST0001")
+        handlers.handle_booking_confirmation(mailbox.normalize({"id": tid + 50, "from": "sara@lindqvist-medtech.mail",
+            "subject": "Booking BK-CUST0001 - please add insurance", "body": "Please add cargo insurance for EUR 30,000."}))
+        self.assertEqual(db.session(tid)["status"], "needs_human")
+        self.assertIn("BK-CUST0001", db.session(tid)["note"])
+
+
 if __name__ == "__main__":
     unittest.main()

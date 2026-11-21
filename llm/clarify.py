@@ -111,7 +111,9 @@ def answer(mail):
     if mail["sender"] != (s["customer"] or "").lower():
         return main.needs_human(tid, mail, "answer to our question came from %s, not the customer" % mail["sender"])
     fields = json.loads(s["fields"] or "{}")
-    kind, new, usage = _merge_call(fields, mail["body"])
+    from core import attachments
+    files = attachments.as_text(mail)                        # "please find the pickup address attached" (5U 22:17: files)
+    kind, new, usage = _merge_call(fields, mail["body"] + ("\n\n" + files if files else ""))
     merged = dict(fields, **new)
     pc = str(merged.get("pickup_postcode") or "")
     if not merged.get("origin") and pc[:2] in main.ZONE_AIRPORT:

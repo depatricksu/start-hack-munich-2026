@@ -657,9 +657,32 @@ AIRLINE_NO = re.compile(r"\b(cancel+(?:ed|ation)?|rejected|refused|declined|not 
                         r"storniert|abgelehnt|nicht bestätigt|keine kapazität|ausgebucht)\b", re.I)
 
 
+def customer_mail_about_booking(mail):
+    """A customer (not an airline) writes with 'Booking BK-...' in the subject ('Booking BK-123 - please add insurance').
+    Before, it was dropped as confirmation_rejected_sender. Now it goes to the booking it names, like a reply in the
+    thread: after_booking answers a status question or raises cancel / change / complaint; anything else -> a human."""
+    text = mail["subject"] + "\n" + mail["body"]
+    ref, team = BK.search(text), TEAM_REF.search(text)
+    b = crm.find(ref and ref.group(0), team and team.group(0))
+    s = db.session(b["thread_id"]) if b else None
+    if not b or not s or (s.get("customer") or "").lower() != mail["sender"]:
+        db.event("confirmation_rejected_sender", mail["thread_id"], mail["id"], sender=mail["sender"])
+        if s is None and db.session(mail["thread_id"]):
+            return handle_follow_up(mail)
+        return None
+    db.event("customer_mail_about_booking", b["thread_id"], mail["id"], booking_reference=b.get("booking_reference"))
+    before = db.con().execute("SELECT COUNT(*) FROM events WHERE thread_id=?", (b["thread_id"],)).fetchone()[0]
+    after_booking(dict(s), mail)
+    acted = db.con().execute("SELECT kind FROM events WHERE thread_id=? ORDER BY id DESC LIMIT 1", (b["thread_id"],)).fetchone()
+    if acted and acted[0] == "follow_up_ignored":            # a new mail about a booking usually wants something: a human looks
+        db.update_session(b["thread_id"], status="needs_human",
+                          note="CUSTOMER MAIL about %s: %s" % (b.get("booking_reference") or "the booking", own_text(mail["body"])[:300]))
+    return before
+
+
 def handle_booking_confirmation(mail):
     if mail["sender"] not in CARRIER_SENDERS and not _SYSTEM_SENDER.match(mail["sender"]):                    # customers and strangers cannot confirm bookings
-        return db.event("confirmation_rejected_sender", mail["thread_id"], mail["id"], sender=mail["sender"])
+        return customer_mail_about_booking(mail)
     text = mail["subject"] + "\n" + mail["body"]
     ref, team = BK.search(text), TEAM_REF.search(text)
     b = crm.find(ref and ref.group(0), team and team.group(0))
