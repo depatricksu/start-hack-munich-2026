@@ -43,9 +43,23 @@ COMMODITY_DG = re.compile(
     r"nail[\s-]?polish|perfumes?|colognes?|fragrances?|"
     r"safety[\s-]?matches|cigarette[\s-]?lighters?|lighter[\s-]?(?:gas|fluid|refills?)|"
     r"corrosive (?:liquids?|substances?|chemicals?)|oxidizers?|radioactive (?:material|sources?)|explosives (?:for|as)|"
-    r"spraydosen?|druckgas\w*|trockeneis)\b", re.I)
+    r"spraydosen?|druckgas\w*|trockeneis|"
+    # red-team #47 (issues #64-#68): perfume without the word, solvent paint, German words, sanitizer, wet batteries
+    r"eau[\s-]de[\s-](?:parfum|toilette|cologne)|parf[üu]m\w*|nagellack\w*|feuerzeug\w*|lighters|"
+    r"solvent[\s-]?based(?:\s+\w+){0,2}\s+(?:paints?|inks?|coatings?|lacquers?|varnish(?:es)?|adhesives?)|"
+    r"(?:farbe|farben|lack|lacke)\s+auf\s+l[öo]se?mittelbasis|l[öo]se?mittelhaltig\w*|flash[\s-]?point|"
+    r"hand[\s-]?saniti[sz]er\w*|desinfektionsmittel\w*|\d{2,3}\s?%\s*(?:alcohol|ethanol|alkohol)|"
+    r"batter(?:y|ies),?\s+wet|wet[\s-]+(?:cell\s+)?batter(?:y|ies)|lead[\s-]?acid|filled\s+with\s+acid|car\s+batter(?:y|ies))\b", re.I)
 # A confident UN/class for the common ones, keyed by a substring of the match, for a precise description.
 COMMODITY_UN = (
+    ("wet", ("UN2794", "8", "batteries, wet, filled with acid")), ("acid", ("UN2794", "8", "batteries, wet, filled with acid")),
+    ("car batter", ("UN2794", "8", "batteries, wet, filled with acid")),
+    ("eau de", ("UN1266", "3", "perfumery products")), ("parf", ("UN1266", "3", "perfumery products")),
+    ("perfume", ("UN1266", "3", "perfumery products")), ("nail polish", ("UN1263", "3", "paint")),
+    ("nagellack", ("UN1263", "3", "paint")), ("solvent", ("UN1263", "3", "paint")), ("mittel", ("UN1263", "3", "paint")),
+    ("flash", ("UN1263", "3", "paint")), ("lighter", ("UN1057", "2.1", "lighters")), ("feuerzeug", ("UN1057", "2.1", "lighters")),
+    ("saniti", ("UN1170", "3", "ethanol solution")), ("alcohol", ("UN1170", "3", "ethanol solution")),
+    ("ethanol", ("UN1170", "3", "ethanol solution")), ("alkohol", ("UN1170", "3", "ethanol solution")),
     ("aerosol", ("UN1950", "2.1", "aerosols")), ("spray", ("UN1950", "2.1", "aerosols")),
     ("lithium", ("UN3481", "9", "lithium batteries")), ("li-ion", ("UN3481", "9", "lithium batteries")),
     ("li ion", ("UN3481", "9", "lithium batteries")), ("power bank", ("UN3481", "9", "lithium batteries")),
@@ -70,7 +84,7 @@ NEGATED = re.compile(r"\b(?:no|not|without|zero|non|free of|excluding|except|kei
 FREE_AFTER = re.compile(r"^\s*-?\s*free\b|^[^.\n]{0,25}\b(?:empty|unfilled|dummy|replica|toy)\b", re.I)
 ACCESSORY_BEFORE = re.compile(r"\b(?:empty|caps?|lids?|cases?|covers?|chargers?|packaging|boxes|holders?|bags?|labels?|"
                               r"stands?|mounts?|for)\s+(?:\w+\s+){0,2}$", re.I)   # 'caps for aerosol cans', 'cases for power banks'
-ACCESSORY_AFTER = re.compile(r"^\s*(?:packaging|labels?|holders?|cases?|caps?|chargers?)\b", re.I)
+ACCESSORY_AFTER = re.compile(r"^\s*(?:(?:bottles?|cans?|flasks?)\s+)?(?:packaging|labels?|holders?|cases?|caps?|lids?|chargers?|pumps?|atomi[sz]ers?|stoppers?)\b", re.I)   # "perfume bottle caps, plastic" is not DG (#69)
 
 
 def _cargo_text(text):
