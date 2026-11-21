@@ -82,8 +82,33 @@ def handle_rfq(mail):
     price_and_quote(tid, mail, fields)
 
 
+def origin_from_pickup(tid, fields):
+    """Door pickup: the departure airport comes from the pickup postcode (kit/start-kit/pickup_zones.csv), not from
+    the model. Round 17 (21 Nov): the customer gave only "72146 Tuebingen", the model filled in FRA, we priced
+    FRA-EZE and trucked to FRA, and 5U rejected it as too_low: the right lane was STR-EZE. All 11 real door-pickup
+    requests so far that were accepted had origin == zone airport.
+    The model's airport only stays when the CUSTOMER wrote that airport or city in their own mails."""
+    postcode = str(fields.get("pickup_postcode") or "")
+    zone_airport = ZONE_AIRPORT.get(postcode[:2])
+    current = str(fields.get("origin") or "").upper()
+    if not zone_airport or current == zone_airport:
+        return
+    s = db.session(tid) or {}
+    text = "\n".join("%s\n%s" % (r["subject"] or "", r["body"] or "") for r in db.con().execute(
+        "SELECT subject, body FROM mails WHERE thread_id=? AND sender=? ORDER BY id", (tid, s.get("customer") or "")))
+    from shared.rfq import extract_rfq
+    said = (extract_rfq("", text).origin or "").upper()
+    if current and said == current:                          # the customer really asked for another airport
+        return db.event("origin_kept", tid, origin=current, zone_airport=zone_airport, postcode=postcode)
+    fields["origin"] = zone_airport
+    fields.setdefault("filled_by_code", []).append("origin")
+    db.update_session(tid, fields=fields)
+    db.event("origin_from_pickup", tid, was=current or None, now=zone_airport, postcode=postcode)
+
+
 def price_and_quote(tid, mail, fields, asked=False):
     """Everything after the gateway call. Also re-entered by llm/clarify.py when the customer answered our question."""
+    origin_from_pickup(tid, fields)
     postcode = str(fields.get("pickup_postcode") or "")
     weight, volume = fields.get("weight_kg_total") or 0, fields.get("volume_cbm_total") or 0
     if len(fields.get("shipments") or []) > 1:               # several shipments in one mail (pricing/multi.py, Patrick)

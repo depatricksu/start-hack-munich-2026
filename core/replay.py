@@ -72,8 +72,10 @@ def replay_one(rec):
     mail["received_at"] = time.time()                        # it is not expired: we replay it as if it just came in
     recorded_portal = rec["portal"]
     main.llm.extract = lambda m: (json.loads(json.dumps(rec["fields"])), {"replayed": True})
-    portal.options = lambda *a, **k: [dict(o) for o in recorded_portal
-                                      if "trucker" not in o]   # live options had the trucker leg added later
+    def recorded(origin, destination, *a, **k):              # only the lane we ask for: a new origin has no recording
+        return [dict(o) for o in recorded_portal if "trucker" not in o   # live options had the trucker leg added later
+                and o.get("origin") == origin and o.get("destination") == destination]
+    portal.options = recorded
     main.process(mail)
     by_mail = {(b.get("email") or "").lower(): b for b in rec["bids"]}
     for row in bids.rows(rec["tid"]):                        # give every bid we asked for its live answer
