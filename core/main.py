@@ -17,6 +17,7 @@ from sourcing import portal
 from actions import queue as actions            # take-over queue: sends human replies typed in the UI
 from shared.rfq import gate as rfq_gate
 from pricing import multi, tariff_mail
+from llm import clarify
 
 try:                       # sourcing/bids.py does not exist yet. See CLAUDE.md "How to plug in".
     from sourcing import bids
@@ -54,12 +55,21 @@ def handle_rfq(mail):
     weight, volume = shipment(fields)
     fields["weight_kg_total"], fields["volume_cbm_total"] = weight, volume
     db.update_session(tid, fields=fields, reply_template=fields.get("reply") or "", llm_cost_usd=usage.get("cost_usd"))
+    price_and_quote(tid, mail, fields)
 
+
+def price_and_quote(tid, mail, fields, asked=False):
+    """Everything after the gateway call. Also re-entered by llm/clarify.py when the customer answered our question."""
+    postcode = str(fields.get("pickup_postcode") or "")
+    weight, volume = fields.get("weight_kg_total") or 0, fields.get("volume_cbm_total") or 0
     if len(fields.get("shipments") or []) > 1:               # several shipments in one mail (pricing/multi.py, Patrick)
         return multi.handle(tid, mail, fields)
     ok, note = rfq_gate(fields, mail)                       # shared/rfq.py (Patrick): stop or warn, with reason codes
     db.event("gate", tid, mail["id"], ok=ok, note=note)
     if not ok:
+        missing = clarify.only_missing(fields, mail)
+        if missing and not asked and config.CLARIFY:         # only data is missing: ask the customer once (Erik)
+            return clarify.ask(tid, mail, fields, missing)
         return needs_human(tid, mail, note)
     if note:
         db.update_session(tid, note=note)                    # warnings only, we still quote

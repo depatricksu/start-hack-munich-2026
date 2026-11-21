@@ -205,6 +205,9 @@ def request_by_mail(tid, chosen, fields):
 def handle_follow_up(mail):
     tid = mail["thread_id"]
     s = db.session(tid)
+    if s and s["status"] == "asked_customer":                    # answer to our clarifying question (llm/clarify.py)
+        from llm import clarify
+        return clarify.answer(mail)
     if not s or s["status"] not in ("quoted", "meeting_proposed"):
         return db.event("follow_up_ignored", tid, mail["id"], status=s and s["status"])
     if mail["sender"] != (s["customer"] or "").lower():          # only the customer who asked can book on this quote

@@ -37,3 +37,4 @@ POLL_S = float(os.environ.get("POLL_S", "1.5"))
 BID_WAIT_S = float(os.environ.get("BID_WAIT_S", "90"))
 # An RFQ older than this is dead (expires after 6 min). We do not answer it, e.g. after a restart.
 RFQ_MAX_AGE_S = float(os.environ.get("RFQ_MAX_AGE_S", "330"))
+CLARIFY = os.environ.get("CLARIFY", "1") == "1"     # ask the customer when only data is missing (Erik, 21 Nov)
