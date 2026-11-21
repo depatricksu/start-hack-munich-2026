@@ -259,7 +259,9 @@ def request_by_mail(tid, chosen, fields):
             "Our reference: {ref}\nRoute: {o} - {d}\nWeight: {w} kg, volume {v} cbm\nRate: {rate}, all-in {p} {c}\n\n"
             "Please confirm with your booking reference.\n\nBest regards\nYour forwarding team").format(
         ref=crm.team_reference(tid), o=chosen["origin"], d=chosen["destination"], rate=rate,
-        w=fields.get("weight_kg_total"), v=fields.get("volume_cbm_total"), p=chosen["total"], c=chosen["currency"])
+        w=fields.get("weight_kg_total"), v=fields.get("volume_cbm_total"),
+        p=chosen.get("flight_total") or chosen["total"],          # the airline's price, without our trucker leg
+        c=chosen.get("flight_currency") or chosen["currency"])
     return mailbox.send(to, "Booking request %s %s-%s" % (crm.team_reference(tid), chosen["origin"], chosen["destination"]),
                         body, thread_id=tid)
 
@@ -347,6 +349,65 @@ def correction_before_quote(s, mail):
         return main.needs_human(tid, mail, "customer corrected the shipment, no sheet/portal price for the new weight")
 
 
+PRICE_TOLERANCE = Decimal("1.005")       # a booking price up to 0.5% above the quote is rounding, not a new price
+
+
+def booked_above_quote(chosen, r):
+    """The portal books at ITS price, and that can be above the rate we quoted from: 5U 20:45, rounds 48 and 49
+    were booked 10% above the quote and we still confirmed the old price (-22.5 points each). Returns the new
+    all-in total (flight at the booked price + the trucker leg), or None when the booking matches the quote."""
+    try:
+        flight_cur = chosen.get("flight_currency") or chosen.get("currency") or "EUR"
+        if (r.get("currency") or "EUR") != flight_cur or flight_cur != (chosen.get("currency") or "EUR"):
+            return None                                          # other currency: no safe comparison
+        quoted, booked = Decimal(str(chosen.get("flight_total") or chosen["total"])), Decimal(str(r["price"]))
+        if booked <= quoted * PRICE_TOLERANCE:
+            return None
+        return (Decimal(str(chosen["total"])) + booked - quoted).quantize(Decimal("0.01"))
+    except Exception:
+        return None
+
+
+def propose_new_price(tid, mail, chosen, r, new_total):
+    """The airline booked above our quote: never confirm the old price. Tell the customer the new total and ask."""
+    old, cur = chosen["total"], chosen.get("currency") or "EUR"
+    new = dict(chosen, quoted_total=old, total=str(new_total), booked_price=str(r["price"]))
+    if cur == "EUR":
+        new["total_eur"] = str(new_total)
+    db.update_session(tid, status="reprice_proposed", chosen=new,
+                      note="airline booked at %s %s, above our quote %s: asked the customer to confirm %s" % (
+                          r["price"], cur, old, new_total))
+    db.event("booking_price_changed", tid, mail["id"], quoted_total=old, booked_price=r["price"],
+             new_total=str(new_total), booking_reference=r.get("booking_reference"))
+    b = crm.get(tid)
+    subject = b["subject"] if (b["subject"] or "").lower().startswith("re:") else "Re: " + (b["subject"] or "")
+    ok = mailbox.send(b["customer"], subject,
+                      _write("price_changed", b.get("language") or "en", dict(b, price=old),
+                             {"NEW_PRICE": "%s %s" % (new_total, cur)}),
+                      in_reply_to=mail["id"], thread_id=tid)
+    db.event("customer_informed" if ok else "customer_inform_failed", tid, message="price_changed")
+    return ok
+
+
+def reprice_answer(s, mail):
+    """The customer's answer to 'the airline's price changed, do you want to go ahead at the new price?'"""
+    tid = s["thread_id"]
+    verdict = classify(mail["body"], mail.get("subject"))
+    db.event("follow_up", tid, mail["id"], verdict=verdict, status=s["status"])
+    b = crm.get(tid) or {}
+    ref = b.get("booking_reference")
+    if verdict == "accept" and b:
+        confirmed = b["status"] == "confirmed"                   # the airline's confirmation may already be in
+        crm.upsert(tid, last_customer_mail_id=mail["id"])
+        db.update_session(tid, status="confirmed" if confirmed else "booked", note="customer accepted the new price")
+        return _tell_customer(crm.get(tid), "confirmed" if confirmed else "booked")
+    if verdict == "decline":
+        crm.upsert(tid, status="cancel_pending")                 # a late airline confirmation must not reach the customer
+        return _needs_human(tid, mail["id"], "customer declined the new price %s: cancel booking %s with %s by mail" % (
+            b.get("price"), ref, b.get("airline")))
+    return _needs_human(tid, mail["id"], "customer answered the new price without a clear yes or no (booking %s stands)" % ref)
+
+
 def handle_follow_up(mail):
     tid = mail["thread_id"]
     s = db.session(tid)
@@ -358,6 +419,8 @@ def handle_follow_up(mail):
     if s and s["status"] == "needs_human" and (s.get("note") or "").startswith(UNCLEAR_NOTE):
         s = dict(s, status="quoted")                             # 'does it include X?' then 'ok, book it': read the new mail
         db.update_session(tid, status="quoted", note="customer wrote again after an unclear reply")
+    if s and s["status"] == "reprice_proposed" and mail["sender"] == (s["customer"] or "").lower():
+        return reprice_answer(s, mail)                           # yes or no to the airline's new price
     if not s or s["status"] not in ("quoted", "meeting_proposed", "awaiting_docs"):
         return db.event("follow_up_ignored", tid, mail["id"], status=s and s["status"])
     if mail["sender"] != (s["customer"] or "").lower():          # only the customer who asked can book on this quote
@@ -409,8 +472,12 @@ def handle_follow_up(mail):
             crm.upsert(tid, status="failed", raw={"reason": r}, **base)
             return _needs_human(tid, mail["id"], r)
         else:
+            new_total = booked_above_quote(chosen, r)
             crm.upsert(tid, status="booked", booking_reference=r["booking_reference"], booked_at=time.time(),
-                       raw=r, **dict(base, rate_id=r.get("rate_id") or base["rate_id"]))
+                       raw=r, **dict(base, rate_id=r.get("rate_id") or base["rate_id"],
+                                     price=str(new_total) if new_total else base["price"]))
+            if new_total:                                        # booked above the quote: ask, do not confirm the old price
+                return propose_new_price(tid, mail, chosen, r, new_total)
             db.update_session(tid, status="booked")
             kind = "booked"
     else:
@@ -441,6 +508,10 @@ def handle_booking_confirmation(mail):
         return db.event("confirmation_duplicate", b["thread_id"], mail["id"])
     crm.upsert(b["thread_id"], status="confirmed", confirmed_at=time.time(),
                booking_reference=b["booking_reference"] or (ref and ref.group(0)))
+    waiting = db.session(b["thread_id"])
+    if waiting and waiting["status"] == "reprice_proposed":      # the customer has not agreed to the new price yet
+        return db.event("booking_confirmed", b["thread_id"], mail["id"], booking_reference=ref and ref.group(0),
+                        held="customer has not confirmed the new price")
     db.update_session(b["thread_id"], status="confirmed")
     db.event("booking_confirmed", b["thread_id"], mail["id"], booking_reference=ref and ref.group(0))
     _tell_customer(crm.get(b["thread_id"]), "confirmed")

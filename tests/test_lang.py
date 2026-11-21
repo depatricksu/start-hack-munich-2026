@@ -121,7 +121,7 @@ class Gate(unittest.TestCase):
 
 class BookingAndTracking(unittest.TestCase):
     V = {"ROUTE": "HAM-BOG", "AIRLINE": "Elbflug", "PRICE": "900.00 EUR", "REF": "BK-AAAA1111", "TRANSIT": 3,
-         "SLOTS": "Mon 10:00", "FORWARDER": "Jonas", "ALT_AIRLINE": "Isar Air", "ALT_PRICE": "850.00 EUR", "ALT_TRANSIT": 5}
+         "SLOTS": "Mon 10:00", "FORWARDER": "Jonas", "ALT_AIRLINE": "Isar Air", "ALT_PRICE": "850.00 EUR", "ALT_TRANSIT": 5, "NEW_PRICE": "990.00 EUR"}
 
     def test_booking_mails_language_signature_and_tone(self):
         for kind in replies.BODY:
