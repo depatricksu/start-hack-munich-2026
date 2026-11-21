@@ -104,6 +104,9 @@ DRY_RUN=1 LLM_FAKE=0 python3 -m core.main      # also call the real gateway (cos
 DRY_RUN=0 python3 -m core.supervise            # Erik's MacBook only: starts the clerk, restarts it after a crash
 python3 -m core.restart                        # runner, after `git pull`: tests + fake mail, then a clean restart
 python3 -m core.restart --check                # anyone: is my code safe to go live?
+python3 -m core.share --get                    # anyone: download the runner's newest data (real mails, bids, verdicts)
+python3 -m core.replay                         # anyone: old quote vs today's code vs 5U's points, on the real requests
+DB_PATH=examples/real/snapshot.db python3 -m core.stats   # any tool on the real data, without touching the live DB
 python3 -m core.main --fake examples/rfq.json  # no key, no network: one fake mail through the whole loop
 python3 -m core.stats                          # numbers to calibrate with
 python3 -m pricing.price FRA LAX 120 0.9       # price check
@@ -113,4 +116,7 @@ The running clerk keeps its OLD code in memory. `git pull` alone changes nothing
 `python3 -m core.restart`. It restarts the clerk only if the code imports, all tests pass and a fake mail gets a quote.
 If a check fails, the old code keeps running: fix, pull, run it again. Never Ctrl+C the clerk to update it.
 A second clerk on the same DB refuses to start (lock file `data/clerk.lock`). The `start` event logs the commit.
+Real data: the supervisor uploads a snapshot of the live DB every 15 min (`core/share.py`, a file on the GitHub release
+`runner-data`, not a commit). `core.restart` also prints a replay report: what today's code would quote on the real
+requests we already got (`core/replay.py`). A round that scored full and would now change is a warning to look at.
 Before you push: `python3 -m core.restart --check` on your own machine. A push that fails it cannot go live.

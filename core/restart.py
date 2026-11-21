@@ -35,7 +35,25 @@ def checks():
     if ok and "quote_sent" not in out:
         ok = False
         print("  (the fake mail ended without a quote)")
+    if ok:
+        replay_report(test_env)
     return ok, out
+
+
+def replay_report(env):
+    """Report only, never blocks: what would today's code have quoted on the real requests we already got?"""
+    snap = os.path.join(config.ROOT, "examples", "real", "snapshot.db")
+    live = config.DB_PATH if os.path.exists(config.DB_PATH) and safety.is_locked() else None   # a clerk runs here: the runner
+    path = live or (snap if os.path.exists(snap) else None)
+    if not path:
+        return print("  %-28s%s" % ("replay of real requests", "skipped (no snapshot: python3 -m core.share --get)"))
+    p = subprocess.run([sys.executable, "-m", "core.replay", path], cwd=config.ROOT, env=env, capture_output=True,
+                       text=True, timeout=300)
+    last = (p.stdout.strip().splitlines() or ["no output"])[-1]
+    print("  %-28s%s" % ("replay of real requests", "ok" if p.returncode == 0 else "LOOK AT THIS (not blocking)"))
+    print("    " + last)
+    if p.returncode != 0:
+        print("    Details: python3 -m core.replay %s" % path)
 
 
 def main():

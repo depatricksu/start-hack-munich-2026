@@ -9,3 +9,4 @@ data/
 .claude/.agent-chat-seen
 .claude/.agent-chat-me
 .claude/settings.local.json
+examples/real/
