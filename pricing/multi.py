@@ -7,7 +7,7 @@ Anything we cannot price safely (door pickup without bids, unknown lane, missing
 The session's `chosen` stays one dict (UI and booking read it): airline "A + B", total = sum, source "multi",
 plus `parts` = the chosen option per shipment. Booking sends multi accepts to a human for now.
 """
-import csv, os, time
+import csv, json, os, re, time
 from decimal import Decimal
 
 from core import config, db, mailbox
@@ -19,6 +19,8 @@ ZONE_AIRPORT = {r["zone"]: r["airport"] for r in csv.DictReader(open(_ZONES))}
 
 FALLBACK = ("Hello,\n\nthank you for your request. Here are our all-in prices per shipment:\n\n{PRICE_TABLE}\n\n"
             "All-in total: {TOTAL}\n\nBest regards\nYour forwarding team")
+FALLBACK_DE = ("Guten Tag,\n\nvielen Dank für Ihre Anfrage. Hier unsere Gesamtpreise je Sendung:\n\n{PRICE_TABLE}\n\n"
+               "Gesamtpreis: {TOTAL}\n\nMit freundlichen Grüßen\nIhr Forwarding-Team")
 
 
 def _totals(s):
@@ -92,9 +94,13 @@ def handle(tid, mail, fields):
         return db.event("quote_skipped_already_sent", tid)
 
     s = db.session(tid)
-    template = s["reply_template"] if "{PRICE_TABLE}" in (s["reply_template"] or "") else FALLBACK
+    # Code-only body (Erik's dry run: the LLM mixed {PRICE}/{AIRLINE} into multi replies). German if the mail was.
+    template = FALLBACK_DE if (json.loads(s["fields"] or "{}").get("language") or "").lower() == "de" else FALLBACK
     body = (template.replace("{PRICE_TABLE}", "\n".join(_line(p) for p in parts))
             .replace("{TOTAL}", "%.2f EUR" % total))
+    if re.search(r"\{[A-Z_]+\}", body):                    # never send a raw placeholder
+        db.update_session(tid, status="needs_human", note="reply still had a placeholder, not sent")
+        return db.event("needs_human", tid, mail["id"], why="placeholder left in multi reply")
     subject = s["subject"] if s["subject"].lower().startswith("re:") else "Re: " + s["subject"]
     ok = mailbox.send(s["customer"], subject, body, in_reply_to=tid, thread_id=tid)
     now = time.time()

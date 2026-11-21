@@ -29,7 +29,7 @@ Do not calculate anything. Copy numbers as written (convert units to cm and kg o
 The reply: write it in the language of the customer's email, never any other (an English email gets an English reply, a German email a German reply). Greet with the full name exactly as written (for example "Guten Tag K. Weber" or "Hi Anna"); never add Frau, Herr, Mr or Ms. Short, warm, like a real colleague wrote it, no AI phrases.
 State one all-in price using exactly the placeholder {PRICE}. Mention {AIRLINE} and {TRANSIT_DAYS} days transit.
 If there are several shipments, do NOT use {PRICE}, {AIRLINE} or {TRANSIT_DAYS}: put {PRICE_TABLE} on its own line where the per-shipment prices go and state the all-in total with {TOTAL}.
-Never write a number for the price yourself. Sign as "Your forwarding team" (in German: "Ihr Forwarding-Team")."""
+Never write a number for the price yourself. Sign as "Your forwarding team". Only if the reply is in German, sign as "Ihr Forwarding-Team" instead."""
 
 # USD per 1M tokens (input, output). Only used for our own log; 5U measures the real cost.
 PRICES = {"gpt-4o-mini": (0.15, 0.60)}
@@ -60,6 +60,18 @@ def safe_reply(text, lang="en", multi=False):
     return (FALLBACK_REPLY_DE if (lang or "").lower() == "de" else FALLBACK_REPLY), False
 
 
+def _fill_places(fields, mail):
+    """The model sometimes returns null for a city it knows in another language: fill from our own city list."""
+    if fields.get("origin") and fields.get("destination"):
+        return
+    from shared.rfq import extract_rfq
+    r = extract_rfq(mail.get("subject") or "", mail.get("body") or "")
+    for k in ("origin", "destination"):
+        if not fields.get(k) and getattr(r, k):
+            fields[k] = getattr(r, k)
+            fields.setdefault("filled_by_code", []).append(k)
+
+
 def _clip(body, head=3000, tail=3000):
     """Same token budget as before, but the end of a long mail (where the request often is) is kept too."""
     body = body or ""
@@ -80,6 +92,7 @@ def extract(mail):
     if status != 200:
         raise RuntimeError("gateway %s: %s" % (status, str(data)[:300]))
     fields = json.loads(data["choices"][0]["message"]["content"])
+    _fill_places(fields, mail)
     fields["reply"], fields["reply_ok"] = safe_reply(fields.get("reply"), fields.get("language"),
                                                      multi=len(fields.get("shipments") or []) > 1)
     u = data.get("usage") or {}

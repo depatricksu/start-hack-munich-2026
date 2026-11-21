@@ -47,6 +47,13 @@ DESTINATIONS = _load_destinations()             # every IATA code someone serves
 
 # City names customers may write instead of codes (EN + DE + local spellings).
 CITY_TO_IATA = {
+    # other languages (Erik's dry run: Italian "Francoforte" / "Dubai" gave destination=null)
+    "francoforte": "FRA", "francfort": "FRA", "fráncfort": "FRA", "monaco di baviera": "MUC", "munique": "MUC",
+    "amburgo": "HAM", "hambourg": "HAM", "colonia": "CGN", "stoccarda": "STR", "dusseldorf am rhein": "DUS",
+    "nueva york": "JFK", "nuova york": "JFK", "pechino": "PEK", "pékin": "PEK", "pekín": "PEK", "dubái": "DXB",
+    "dubaï": "DXB", "città del messico": "MEX", "ciudad de méxico": "MEX", "ciudad de mexico": "MEX",
+    "san paolo": "GRU", "tel aviv-yafo": "TLV", "singapour": "SIN", "singapura": "SIN", "le caire": "CAI",
+    "il cairo": "CAI", "el cairo": "CAI", "seul": "ICN", "séoul": "ICN",
     # origins
     "frankfurt": "FRA", "munich": "MUC", "münchen": "MUC", "muenchen": "MUC",
     "dusseldorf": "DUS", "düsseldorf": "DUS", "duesseldorf": "DUS",

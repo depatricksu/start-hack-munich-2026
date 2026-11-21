@@ -7,7 +7,7 @@
 Loop: poll mailbox -> save mail -> router decides the route -> HANDLERS[route](mail).
 To add a feature, write a handler in your own folder and register it in HANDLERS below.
 """
-import csv, json, os, sys, time, traceback
+import csv, json, os, re, sys, time, traceback
 from decimal import Decimal
 from . import config, db, mailbox
 from router.route import route
@@ -111,6 +111,10 @@ def finalize(tid):
     template = s["reply_template"] if "{PRICE}" in (s["reply_template"] or "") else llm.FALLBACK_REPLY
     body = (template.replace("{PRICE}", "%s %s" % (best["total"], best["currency"]))
             .replace("{AIRLINE}", best["airline"]).replace("{TRANSIT_DAYS}", str(best["transit_days"])))
+    if re.search(r"\{[A-Z_]+\}", body):                    # a placeholder the model invented: never send it raw
+        db.event("reply_placeholder_left", tid, body=body[:300])
+        body = (llm.FALLBACK_REPLY.replace("{PRICE}", "%s %s" % (best["total"], best["currency"]))
+                .replace("{AIRLINE}", best["airline"]).replace("{TRANSIT_DAYS}", str(best["transit_days"])))
     subject = s["subject"] if s["subject"].lower().startswith("re:") else "Re: " + s["subject"]
     ok = mailbox.send(s["customer"], subject, body, in_reply_to=tid, thread_id=tid)
     now = time.time()
