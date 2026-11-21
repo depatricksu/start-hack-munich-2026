@@ -96,8 +96,9 @@ def handle_rfq(mail):
     weight, volume = shipment(fields)
     diff = dg.compare(dict(fields, weight_kg_total=weight, volume_cbm_total=volume), mail)   # attachment vs mail (Riky)
     if diff:
-        db.event("attachment_mismatch", tid, mail["id"], diff=diff, override=dg.override())
-        if dg.override():                                    # the packing list is the shipping document: price on it
+        disowned = dg.mail_disowns_attachment(mail.get("body"))   # "the attached packing list is outdated": the mail wins
+        db.event("attachment_mismatch", tid, mail["id"], diff=diff, override=dg.override() and not disowned, disowned=disowned)
+        if dg.override() and not disowned:                   # the packing list is the shipping document: price on it
             used = {}
             if "gross_kg" in diff and dg.winner(diff["gross_kg"]) != weight:
                 weight, used["gross_kg"] = dg.winner(diff["gross_kg"]), diff["gross_kg"]
@@ -428,6 +429,7 @@ HANDLERS = {
     "follow_up": booking.handle_follow_up,
     "booking_confirmation": booking.handle_booking_confirmation,
     "tracking": tracking.handle,                         # task 05 (Patrick): answer from our bookings table
+    "bounce": bids.on_bounce,                            # mailer-daemon: that carrier never got our bid mail
     "tariff": tariff_mail.handle,                        # Patrick: airline tariff mail -> live price update
 }
 
