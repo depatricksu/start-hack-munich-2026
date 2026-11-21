@@ -122,8 +122,16 @@ class Attachments(unittest.TestCase):
     @unittest.skipUnless(__import__("shutil").which("swiftc"), "OCR needs macOS")
     def test_photo_is_read_by_ocr(self):
         import os
+        import time
+        from dg import attach
         path = os.path.join(os.path.dirname(__file__), "..", "kit", "start-kit", "danube-wings-cargo-tariff-2026-11-p2.jpg")
-        text = dg.attachment_text(open(path, "rb").read(), "scan.jpg")
+        attach.warm_up()                                     # the live path never waits for a cold worker
+        for _ in range(100):                                 # give the background warm-up up to 10 s here
+            if attach._WORKER["warm"]:
+                break
+            time.sleep(0.1)
+        with open(path, "rb") as f:
+            text = dg.attachment_text(f.read(), "scan.jpg")
         if not text:                                         # OCR timed out or could not run on this machine: skip, don't block restart
             self.skipTest("OCR gave no text here")
         self.assertIn("CGN-SYD", text)

@@ -153,18 +153,25 @@ def _ask(path, timeout):
 
 
 def ocr(data, suffix):
-    """Text in a photo / scan (macOS Vision). "" when not possible. Never raises."""
-    if time.time() < _OCR_OFF_UNTIL[0]:
+    """Text in a photo / scan (macOS Vision). "" when not possible. Never raises, never holds up the clerk:
+    the clerk runs ONE loop, so on this live path the worker must already be warm (warm_up() does that in the
+    background) and a page gets at most OCR_TIMEOUT_S. Cold, busy or broken -> "" at once and the odd_attachment
+    alarm reports the file (Kai's review of ead9146)."""
+    if time.time() < _OCR_OFF_UNTIL[0] or not _WORKER["warm"]:
+        if not _WORKER["warm"]:
+            warm_up()                                          # cold: start warming for the NEXT photo, do not wait
+        return ""
+    if not _LOCK.acquire(timeout=0.5):                         # warm-up or another page in progress: do not queue
         return ""
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
         f.write(data)
         path = f.name
     try:
-        with _LOCK:
-            text = _ask(path, OCR_TIMEOUT_S if _WORKER["warm"] else OCR_WARMUP_S)
+        text = _ask(path, OCR_TIMEOUT_S)
     except Exception:
         text = None
     finally:
+        _LOCK.release()
         os.unlink(path)
     if text is None:
         _OCR_OFF_UNTIL[0] = time.time() + 600
@@ -172,8 +179,18 @@ def ocr(data, suffix):
     return text
 
 
+_WARMING = threading.Event()
+
+
 def warm_up():
-    """Build + start the worker and read one tiny page, in the background, so the first real photo is fast."""
+    """Build + start the worker and read one page in the BACKGROUND (up to OCR_WARMUP_S), so live pages are fast.
+    Safe to call often: only one warm-up runs at a time."""
+    if _WORKER["warm"] or _WARMING.is_set():
+        return
+    if not (shutil.which("swiftc") or os.path.exists(_ocr_bin_path())):
+        return
+    _WARMING.set()
+
     def go():
         try:
             sample = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "kit", "start-kit",
@@ -183,8 +200,9 @@ def warm_up():
                     _ask(os.path.abspath(sample), OCR_WARMUP_S)
         except Exception:
             pass
-    if shutil.which("swiftc") or os.path.exists(_ocr_bin_path()):
-        threading.Thread(target=go, daemon=True).start()
+        finally:
+            _WARMING.clear()
+    threading.Thread(target=go, daemon=True).start()
 
 
 def doctor():
