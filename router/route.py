@@ -45,6 +45,8 @@ def route(mail, our_address="google@hackloop.mail"):
     if sender == "ratedesk@hackloop.mail":
         return "ratedesk"
     if sender in CARRIERS:
+        if re.search(r"\[bid-\d+\]", subject):               # the answer to OUR bid mail. 5U 22:17: truckers send the price
+            return "carrier_bid"                             # as a file (PDF, Word, text, voice): still a bid, not a tariff
         if mail["attachments"] or "tariff" in subject or "rate sheet" in subject:
             return "tariff"
         return "carrier_bid"

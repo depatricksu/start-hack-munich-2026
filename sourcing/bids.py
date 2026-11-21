@@ -15,12 +15,24 @@ The experiment (BID_EXPERIMENT=1) tells us if a bid by mail beats sheet/portal. 
 """
 import csv, json, os, re, time
 from decimal import Decimal, InvalidOperation
-from core import config, db, mailbox
+from core import attachments, config, db, mailbox
 
 _KIT = os.path.join(config.ROOT, "kit", "start-kit")
 CARRIERS = list(csv.DictReader(open(os.path.join(_KIT, "carrier-list.csv"))))
 RATEDESK = "ratedesk@hackloop.mail"
 REF = re.compile(r"\bBID-(\d+)\b", re.I)
+PRICE = re.compile(r"\d[\d.,]*\s*(?:EUR|USD|CHF|GBP|€|\$)", re.I)
+# A trucker's lead time as the offer files write it. Read by code, because the model took "27 hours from order to
+# collection" for 3 hours on a PDF whose table lost its layout (live, 21 Nov 22:25), and hours decide the balanced pick.
+LEAD = re.compile(r"(\d{1,3})\s*hours?\s+(?:from\s+(?:the\s+)?order|after\s+(?:your\s+)?order)"   # 27 hours from order to collection
+                  r"|collection:?\s+in\s+(\d{1,3})\s*hours?"                                    # Collection in 31 hours
+                  r"|lead\s*time:?\s+(\d{1,3})\s*hours?", re.I)                                 # Lead time 28 hours
+
+
+def lead_hours(text):
+    """Hours from order to collection, when the text states it once and clearly. None otherwise."""
+    found = {int(next(g for g in m.groups() if g)) for m in LEAD.finditer(text or "")}
+    return found.pop() if len(found) == 1 else None
 EXTRA_COLUMNS = {"email": "TEXT", "role": "TEXT", "required": "INTEGER DEFAULT 1", "status": "TEXT",
                  "total_eur": "TEXT", "note": "TEXT", "hours": "REAL"}
 _ready = False
@@ -156,6 +168,9 @@ def _num(x):
 def read_answer(mail):
     """One tiny gateway call. Returns (form, cost_usd)."""
     text = "Subject: %s\n\n%s" % (mail["subject"], mail["body"][:4000])
+    files = attachments.as_text(mail)                 # 5U 22:17: the offer is in the attached file, the mail only points to it
+    if files:
+        text += "\n\n[The offer is in the attached file. The file as text:]\n" + files
     if config.LLM_FAKE:
         m = re.search(r"(\d[\d.,]*)\s*(EUR|USD|CHF|GBP)", text, re.I)
         d = re.search(r"(\d+)\s*(?:days?|tage?)", text, re.I)
@@ -224,10 +239,21 @@ def on_reply(mail):
         return db.event("bid_extra_reply_ignored", bid["thread_id"], mail["id"], bid_id=bid["id"])
     tid, now = bid["thread_id"], time.time()
     session = db.session(tid) or {}
+    if mail.get("attachments") and "attachments_text" not in mail:
+        attachments.read(mail)
+    lost = attachments.unreadable(mail)
     try:
-        form, cost = read_answer(mail)
+        if lost and not attachments.as_text(mail) and not PRICE.search(mail["body"]):
+            # a voice message (.mp3) or a photo: answered, but not a price we can use. No gateway call, and the quote
+            # does not wait for this carrier any longer.
+            form, cost = {"unclear": "offer is in a file we cannot read: %s" % ", ".join(lost)}, None
+        else:
+            form, cost = read_answer(mail)
     except Exception as e:                            # gateway down: the bid counts as answered but unusable
         form, cost = {"unclear": "could not read: %s" % e}, None
+    stated = lead_hours(mail["body"] + "\n" + attachments.as_text(mail)) if bid["role"] == "trucker" else None
+    if stated is not None and not form.get("declined") and form.get("transit_hours") != stated:
+        form["transit_hours_model"], form["transit_hours"] = form.get("transit_hours"), stated
     fields = json.loads(session.get("fields") or "{}")
     chargeable = max(fields.get("weight_kg_total") or 0, (fields.get("volume_cbm_total") or 0) * 167)
     currency = (form.get("currency") or "EUR").upper()
@@ -241,7 +267,7 @@ def on_reply(mail):
     days = form.get("transit_days") if form.get("transit_days") is not None else (round(hours / 24, 2) if hours is not None else None)
     db.con().execute("UPDATE bids SET replied_at=?, total=?, currency=?, transit_days=?, hours=?, total_eur=?, status=?, note=?, carrier=?, raw=? WHERE id=?",
                      (now, str(total) if total is not None else None, currency, days, hours, total_eur, status,
-                      form.get("unclear"), carrier, mail["body"][:4000], bid["id"]))
+                      form.get("unclear"), carrier, (mail["body"] + "\n\n" + attachments.as_text(mail))[:4000], bid["id"]))
     if cost and session:
         db.update_session(tid, llm_cost_usd=(session.get("llm_cost_usd") or 0) + cost)
     db.event("bid_received", tid, mail["id"], bid_id=bid["id"], carrier=carrier, role=bid["role"], status=status,
