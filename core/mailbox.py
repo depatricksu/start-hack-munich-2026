@@ -103,16 +103,19 @@ def in_customer_language(to, body, thread_id, event="mail_out"):
         return body
 
 
-def send(to, subject, body, in_reply_to=None, thread_id=None, event="mail_out"):
+def send(to, subject, body, in_reply_to=None, thread_id=None, event="mail_out", attachments=None):
     """Send a mail. With DRY_RUN=1 it is only logged. Returns True if sent (or dry run).
 
     event: name of the log entry. Customer mails are "mail_out"; bid requests to carriers use "bid_mail_out",
     so "mails we sent the customer" stays easy to count."""
     body = in_customer_language(to, body, thread_id, event)
+    names = [{"filename": a["filename"], "bytes": len(a.get("content_base64") or "") * 3 // 4} for a in attachments or []]
     if config.DRY_RUN:
-        db.event(event + "_dry_run", thread_id, in_reply_to, to=to, subject=subject, body=body)
+        db.event(event + "_dry_run", thread_id, in_reply_to, to=to, subject=subject, body=body, attachments=names)
         return True
     payload = {"to": to, "subject": subject, "body": body}
+    if attachments:                                           # [{"filename", "content_type", "content_base64"}], at most 5
+        payload["attachments"] = attachments[:5]
     if in_reply_to:
         payload["in_reply_to"] = in_reply_to
     for _ in range(3):
@@ -120,8 +123,13 @@ def send(to, subject, body, in_reply_to=None, thread_id=None, event="mail_out"):
         if status == 429:
             time.sleep(min(data["retry_after"], 10))
             continue
+        if status in (400, 413, 422) and payload.get("attachments"):   # the file was refused: the mail still has to go
+            db.event("attachment_rejected", thread_id, in_reply_to, status=status, response=str(data)[:300], files=names)
+            payload.pop("attachments")
+            names = []
+            continue
         break
     ok = status in (200, 201)
     db.event(event if ok else event + "_failed", thread_id, in_reply_to, to=to, subject=subject, body=body,
-             status=status, response=data)
+             status=status, response=data, attachments=names)
     return ok
