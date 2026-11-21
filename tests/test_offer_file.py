@@ -23,6 +23,10 @@ class Asked(unittest.TestCase):
         self.assertEqual(offer_file.requested("Merci de joindre votre offre en PDF."), {"pdf"})
         self.assertEqual(offer_file.requested("Please send your quotation as a Word document."), {"docx"})
         self.assertEqual(offer_file.requested("请以PDF附件形式发送报价。"), {"pdf"})
+        # round 78, live: "the offer", not "your offer"
+        self.assertEqual(offer_file.requested("Please attach the offer as a PDF when you reply, as our purchasing department needs it for filing."), {"pdf"})
+        self.assertEqual(offer_file.requested("Please quote an all-in price in EUR and attach the offer as a PDF to your reply so our purchasing department can file it."), {"pdf"})
+        self.assertEqual(offer_file.requested("Bitte senden Sie das Angebot als PDF."), {"pdf"})
 
     def test_their_own_file_is_not_a_request(self):
         said = "please find our request for an air freight quotation attached, as a PDF file (quotation-request.pdf)."
