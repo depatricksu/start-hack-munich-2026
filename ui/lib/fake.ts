@@ -46,5 +46,6 @@ export function fakeDetail(id: number): SessionDetail | null {
   if (s.status === "waiting_bids") events.push(ev(4, 10, "waiting_bids", { wait_s: 90 }));
   if (s.quoted_at) events.push(ev(5, s.quoted_at - s.received_at, "quote_sent", { airline: s.chosen?.airline, total: s.chosen?.total }));
   if (s.status === "needs_human") events.push(ev(6, 12, "needs_human", { why: s.note }));
-  return { ...s, events, mails, actions: [] };
+  const reply_files = s.quoted_at ? [{ filename: `offer-GOOGLE-${id}.pdf`, bytes: 2253, type: "application/pdf" }] : [];
+  return { ...s, events, mails, actions: [], reply_files };
 }

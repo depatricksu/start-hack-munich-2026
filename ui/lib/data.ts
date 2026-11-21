@@ -1,7 +1,7 @@
 // One place the screens get data from: the real DB when it has sessions, demo data otherwise.
 import { getDb } from "./db";
 import { fakeDetail, fakeSessions } from "./fake";
-import { ActionRow, EventRow, MailRow, QUOTE_SENT, Session, SessionDetail, Stats } from "./types";
+import { ActionRow, EventRow, FileRef, MailRow, QUOTE_SENT, Session, SessionDetail, Stats } from "./types";
 
 export type Source = "live" | "demo";
 
@@ -42,10 +42,23 @@ export function getDetail(id: number): { source: Source; session: SessionDetail 
   if (!r) return { source: "live", session: null };
   const events = (db.prepare("SELECT id, ts, kind, data FROM events WHERE thread_id=? ORDER BY id").all(id) as Record<string, unknown>[])
     .map((e): EventRow => ({ id: e.id as number, ts: e.ts as number, kind: e.kind as string, data: parse(e.data, {}) }));
-  const mails = db.prepare("SELECT id, sender, subject, body, received_at, route FROM mails WHERE thread_id=? ORDER BY id").all(id) as MailRow[];
+  // Files on the customer's mails come from the stored 5U message (mails.raw); the bytes stay at 5U, we show name and size.
+  const mails = (db.prepare("SELECT id, sender, subject, body, received_at, route, raw FROM mails WHERE thread_id=? ORDER BY id").all(id) as (MailRow & { raw?: string })[])
+    .map(({ raw, ...m }): MailRow => ({
+      ...m,
+      files: (parse<{ attachments?: Record<string, unknown>[] }>(raw, {}).attachments ?? []).map((a): FileRef => ({
+        filename: String(a.filename ?? a.name ?? "attachment"), bytes: typeof a.size === "number" ? a.size : null,
+        type: typeof a.content_type === "string" ? a.content_type : null })),
+    }));
+  // Files we attached to our reply (the offer PDF): logged on the mail_out event by core/mailbox.send.
+  const customer = String(r.customer ?? "").toLowerCase();
+  const sent = [...events].reverse().find((e) => (e.kind === "mail_out" || e.kind === "mail_out_dry_run")
+    && String(e.data.to ?? "").toLowerCase() === customer && Array.isArray(e.data.attachments) && (e.data.attachments as unknown[]).length > 0);
+  const reply_files = ((sent?.data.attachments as Record<string, unknown>[] | undefined) ?? []).map((a): FileRef => ({
+    filename: String(a.filename ?? "attachment"), bytes: typeof a.bytes === "number" ? a.bytes : null, type: null }));
   let actions: ActionRow[] = [];
   try { actions = db.prepare("SELECT id, kind, body, created_at, done_at, result FROM actions WHERE thread_id=? ORDER BY id").all(id) as ActionRow[]; } catch { /* table not created yet */ }
-  return { source: "live", session: { ...rowToSession(r), events, mails, actions } };
+  return { source: "live", session: { ...rowToSession(r), events, mails, actions, reply_files } };
 }
 
 export function computeStats(sessions: Session[]): Stats {
