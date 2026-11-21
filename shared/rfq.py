@@ -219,7 +219,12 @@ def extract_rfq(subject: str, body: str, **envelope) -> RFQ:
         r.service = Service.DOOR_TO_PORT
         r.pickup_postcode = m.group(1)
 
-    if re.search(r"\b(dangerous goods|dgr|hazmat|un ?\d{4}|lithium|gefahrgut)\b", low):
+    try:                                                 # a denial ("no dangerous goods") is not DG (Riky, PR #17)
+        import dg
+        declared = bool(dg.read_declaration(text))
+    except Exception:
+        declared = bool(re.search(r"\bun ?\d{4}\b", low))
+    if declared:
         r.dangerous_goods = True
 
     m = re.search(r"\b(USD|EUR|GBP|CHF)\b", text)
@@ -308,8 +313,12 @@ def validate(r: RFQ) -> list[Issue]:
                 f"pickup zone {r.pickup_zone} maps to {PICKUP_ZONES[r.pickup_zone]}, customer said {r.origin}")
 
     # scope
-    if r.dangerous_goods:
-        add("dangerous_goods", Level.HUMAN, "dangerous goods mentioned -> hand to a human")
+    if r.dangerous_goods:                                # since 17:00 5U sends DG RFQs: dg.apply quotes them (Riky, PR #17)
+        import os
+        if os.environ.get("DG_MODE", "docs").strip().lower() == "human":
+            add("dangerous_goods", Level.HUMAN, "dangerous goods mentioned -> hand to a human")
+        else:
+            add("dangerous_goods", Level.WARNING, "dangerous goods -> quoted with the DG documents paragraph")
     if r.currency_requested and r.currency_requested != QUOTE_CURRENCY:
         add("currency_requested", Level.WARNING,
             f"customer asked for {r.currency_requested}, tariffs are {QUOTE_CURRENCY}")
@@ -420,9 +429,11 @@ def gate(fields: dict, mail: dict) -> tuple[bool, str]:
 
     r = from_fields(fields, mail)
     if r.dangerous_goods or fields.get("dg"):            # DG is no longer a stop: dg/ writes it into the quote
+        import os
         fields["dg"] = fields.get("dg") or _declared_dg(mail)
-        r.dangerous_goods = False
-        if fields["dg"]:
+        human = os.environ.get("DG_MODE", "docs").strip().lower() == "human"
+        r.dangerous_goods = bool(fields["dg"]) and human     # DG_MODE=human: validate() below stops it, as before
+        if fields["dg"] and not human:
             warn.append("dangerous_goods: declared, quoted with the DG documents paragraph")
     for i in validate(r):
         if i.field in ("message_id", "customer_email"):

@@ -64,7 +64,12 @@ class TestClarify(unittest.TestCase):
         self.assertEqual(len(out(88031)), 1)
 
     def test_scope_problems_are_not_asked(self):
-        main.process(mail(88041, "Quote FRA to ORD, lithium batteries UN3480, cheapest."))
+        import os
+        os.environ["DG_MODE"] = "human"                      # DG is only out of scope when DG_MODE=human (Riky, PR #17)
+        try:
+            main.process(mail(88041, "Quote FRA to ORD, lithium batteries UN3480, cheapest."))
+        finally:
+            os.environ.pop("DG_MODE", None)
         self.assertEqual(db.session(88041)["status"], "needs_human")
         self.assertEqual(out(88041), [])
 

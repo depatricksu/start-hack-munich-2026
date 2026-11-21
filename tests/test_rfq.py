@@ -44,10 +44,23 @@ class TestExtract(unittest.TestCase):
         self.assertIn(("mode", Level.WARNING), levels(validate(r)))
         self.assertTrue(can_price(validate(r)))
 
-    def test_dangerous_goods_to_human(self):
+    def test_dangerous_goods_is_quoted_with_dg_paragraph(self):
         r = extract_rfq("RFQ", "FRA-ORD 200 kg 1 cbm lithium batteries UN3480, cheapest", **ENV)
-        self.assertIn(("dangerous_goods", Level.HUMAN), levels(validate(r)))
-        self.assertFalse(can_price(validate(r)))
+        self.assertIn(("dangerous_goods", Level.WARNING), levels(validate(r)))
+        self.assertTrue(can_price(validate(r)))
+
+    def test_dangerous_goods_to_human_when_dg_mode_human(self):
+        import os
+        os.environ["DG_MODE"] = "human"
+        try:
+            r = extract_rfq("RFQ", "FRA-ORD 200 kg 1 cbm lithium batteries UN3480, cheapest", **ENV)
+            self.assertIn(("dangerous_goods", Level.HUMAN), levels(validate(r)))
+        finally:
+            os.environ.pop("DG_MODE", None)
+
+    def test_a_denial_is_not_dangerous_goods_for_the_regex_reader(self):
+        r = extract_rfq("RFQ", "FRA-ORD 200 kg 1 cbm spray cans, no dangerous goods, cheapest", **ENV)
+        self.assertNotIn("dangerous_goods", [f for f, _ in levels(validate(r))])
 
     def test_odd_density_flags_units(self):
         r = extract_rfq("RFQ", "DUS to BOM 100 kg 120 cbm cheapest", **ENV)
