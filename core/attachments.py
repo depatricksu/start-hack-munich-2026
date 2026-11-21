@@ -7,7 +7,7 @@
 A file we cannot read (a photo, a new format) is not an error here: core/alarm.py posts it to the agent chat as
 `odd_attachment`, so a human or an agent looks at it in the round it first appears.
 """
-import base64
+import base64, re
 from . import config, db
 
 KNOWN = {"xlsx", "pdf", "docx", "txt", "csv"}      # types we can turn into text today
@@ -46,6 +46,49 @@ def read(mail):
         db.event("attachments", mail.get("thread_id"), mail.get("id"),
                  files=[dict({k: v for k, v in f.items() if k != "text"}, preview=f["text"][:300]) for f in out])
     return out
+
+
+FACTS = re.compile(r"\d[\d.,]*\s*(?:kg|kgs|kilos?|kilograms?|lbs?|cbm|m3|m³)\b", re.I)   # a weight or a volume
+
+
+def as_text(mail, per_file=2500, limit=4000):
+    """All readable attachment text of a mail, each file under its name. "" when there is none."""
+    parts, used = [], 0
+    for f in mail.get("attachments_text") or []:
+        chunk = f["text"].strip()[:max(0, min(per_file, limit - used))] if f["readable"] else ""
+        if chunk:
+            parts.append("--- attached file: %s ---\n%s" % (f["filename"], chunk))
+            used += len(chunk)
+    return "\n\n".join(parts)
+
+
+def unreadable(mail):
+    """Names of the attached files we could not turn into text (a voice message, a photo)."""
+    return [f["filename"] for f in mail.get("attachments_text") or [] if not f["readable"]]
+
+
+def inline_request(mail):
+    """5U, 21 Nov 22:17: the whole request is in the attached file ("please find our request attached, as a Word
+    document (quotation-request.docx). It has all details of the shipment."). The mail text has no shipment in it, so
+    the clerk said not_a_request and nobody answered. When the mail text has NO weight or volume and a readable file
+    has one, the file IS the request: its text is appended to the body, in memory and in the mails table (the bytes
+    the customer sent stay in mails.raw), so the gateway call and every rule after it (excluded airlines, dangerous
+    goods words, language, the reply gate) read the same text. A normal request with a packing list is not touched:
+    its mail text has the weight. Returns True when the file text was appended."""
+    body = mail.get("body") or ""
+    if FACTS.search(body):
+        return False
+    files = [f for f in mail.get("attachments_text") or [] if f["readable"] and FACTS.search(f["text"])]
+    if not files:
+        return False
+    mail["body"] = body.rstrip() + "\n\n" + as_text(dict(mail, attachments_text=files))
+    try:
+        db.con().execute("UPDATE mails SET body=? WHERE id=?", (mail["body"], mail["id"]))
+        db.con().commit()
+    except Exception as e:
+        db.event("attachments_error", mail.get("thread_id"), mail.get("id"), error=str(e)[:300])
+    db.event("rfq_in_attachment", mail.get("thread_id"), mail.get("id"), files=[f["filename"] for f in files])
+    return True
 
 
 def for_llm(mail):
