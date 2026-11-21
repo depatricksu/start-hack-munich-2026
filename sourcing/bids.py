@@ -216,7 +216,7 @@ def on_reply(mail):
     currency = (form.get("currency") or "EUR").upper()
     total = None if form.get("declined") else bid_total(form, chargeable)
     fx = _fx(currency, form, session) if total is not None else None
-    status = ("declined" if form.get("declined") else "unclear" if total is None or form.get("unclear")
+    status = ("declined" if form.get("declined") else "unclear" if total is None   # a parsed total is kept; the note says why it was unsure
               else "no_fx" if fx is None else "ok")
     total_eur = str((total * fx).quantize(Decimal("0.01"))) if status == "ok" else None
     carrier = form.get("airline") if bid["role"] == "ratedesk" and form.get("airline") else bid["carrier"]

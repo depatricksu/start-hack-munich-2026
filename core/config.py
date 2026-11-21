@@ -42,6 +42,7 @@ BID_MAX_WAIT_S = float(os.environ.get("BID_MAX_WAIT_S", "300"))
 # 1 = on normal requests also ask up to 3 airlines by mail, without waiting, to learn if bids beat sheet/portal.
 # Turn off (0) once we know. See `python -m core.stats`.
 BID_EXPERIMENT = os.environ.get("BID_EXPERIMENT", "1") == "1"
+QUOTE_EUR = os.environ.get("QUOTE_EUR", "1") == "1"        # quote in EUR even if the cheapest flight came in USD
 # An RFQ older than this is dead (expires after 6 min). We do not answer it, e.g. after a restart.
 RFQ_MAX_AGE_S = float(os.environ.get("RFQ_MAX_AGE_S", "330"))
 CLARIFY = os.environ.get("CLARIFY", "1") == "1"     # ask the customer when only data is missing (Erik, 21 Nov)
