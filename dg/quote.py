@@ -29,6 +29,42 @@ DECLARES = re.compile(r"dangerous goods\s*[:=][ \t]*(?=\S)(?!no\b|none\b|n/?a\b|
 NOT_DG = re.compile(r"\b(?:non[- ]?dangerous|not dangerous|no dangerous goods|no dg|non[- ]?dg|no dgr|non[- ]?dgr|no hazmat|"
                     r"not hazardous|non[- ]?hazardous|kein gefahrgut|nicht gef[aä]hrlich)\b", re.I)
 
+# Inherently dangerous commodities (IATA): named in the RFQ with no UN number and no "Dangerous goods:" line.
+# 5U's trick (21 Nov): the commodity is DG by nature (spray cans = aerosols UN1950) but nothing is declared,
+# and a quote that ignores it is declined. Keep this list TIGHT and high-confidence: a false positive asks
+# for DG documents on general cargo and costs the round. Only fires when NOT_DG is absent.
+COMMODITY_DG = re.compile(
+    r"\b(aerosols?|spray[\s-]?cans?|spray[\s-]?paint|"
+    r"lithium[\s-]?(?:ion|metal|batter(?:y|ies)|cells?)|li[\s-]?ion\b|power[\s-]?banks?|"
+    r"dry[\s-]?ice|"
+    r"gas[\s-]?cylinders?|compressed[\s-]?gas|propane|butane|"
+    r"fireworks?|flares?|"
+    r"flammable[\s-]?(?:liquids?|gas(?:es)?|solids?|aerosols?)|"
+    r"nail[\s-]?polish|perfumes?|colognes?|fragrances?|"
+    r"safety[\s-]?matches|lighters?[\s-]?(?:with|refill)?|"
+    r"corrosives?|oxidiz(?:ers?|ing)|radioactive|explosives?)\b", re.I)
+# A confident UN/class for the common ones, keyed by a substring of the match, for a precise description.
+COMMODITY_UN = (
+    ("aerosol", ("UN1950", "2.1", "aerosols")), ("spray", ("UN1950", "2.1", "aerosols")),
+    ("lithium", ("UN3481", "9", "lithium batteries")), ("li-ion", ("UN3481", "9", "lithium batteries")),
+    ("li ion", ("UN3481", "9", "lithium batteries")), ("power bank", ("UN3481", "9", "lithium batteries")),
+    ("dry ice", ("UN1845", "9", "dry ice")), ("fireworks", ("UN0336", "1.4", "fireworks")),
+)
+
+
+def infer_commodity_dg(text):
+    """A DG dict inferred from a commodity name (no UN number declared), or None. Never fires if NOT_DG is present."""
+    if not text or NOT_DG.search(text):
+        return None
+    m = COMMODITY_DG.search(text)
+    if not m:
+        return None
+    hit = m.group(0).lower().replace("-", " ")
+    for key, (un, cls, name) in COMMODITY_UN:
+        if key in hit:
+            return {"un": un, "class": cls, "name": name, "inferred": True}
+    return {"un": None, "class": None, "name": m.group(1).lower(), "inferred": True}
+
 
 def mode():
     m = os.environ.get("DG_MODE", "docs").strip().lower()
@@ -43,7 +79,7 @@ def read_declaration(text):
         return None
     un = UN.search(text)
     if not un and (NOT_DG.search(text) or not DECLARES.search(text)):
-        return None
+        return infer_commodity_dg(text)     # no UN, no declaration: maybe the commodity itself is DG (aerosols, lithium...)
     cls = CLASS.search(text)
     name = NAME_AFTER.search(text) if un else None
     clean = None
@@ -61,20 +97,20 @@ def describe(info):
 
 
 PARAGRAPH = {
-    "en": ("One thing to note: your shipping documents declare dangerous goods ({what}). We can fly this as "
+    "en": ("One thing to note: this shipment contains dangerous goods ({what}). We can fly it as "
            "dangerous goods. Could you please send us the dangerous goods documents: the Shipper's Declaration for "
            "Dangerous Goods and the safety data sheet (MSDS)? We need them to confirm the booking."),
-    "de": ("Ein Hinweis: Laut Ihren Versandunterlagen handelt es sich um Gefahrgut ({what}). Wir können die Sendung "
+    "de": ("Ein Hinweis: Diese Sendung enthält Gefahrgut ({what}). Wir können die Sendung "
            "als Gefahrgut befördern. Könnten Sie uns bitte die Gefahrgutdokumente senden: die Shipper's Declaration "
            "for Dangerous Goods und das Sicherheitsdatenblatt (MSDS)? Wir benötigen sie für die Buchung."),
-    "it": ("Una nota: i documenti di spedizione dichiarano merce pericolosa ({what}). Possiamo trasportarla come "
+    "it": ("Una nota: questa spedizione contiene merce pericolosa ({what}). Possiamo trasportarla come "
            "merce pericolosa. Potrebbe inviarci i documenti per merci pericolose: la Shipper's Declaration for "
            "Dangerous Goods e la scheda di sicurezza (MSDS)? Ci servono per confermare la prenotazione."),
-    "fr": ("Une remarque : vos documents d'expédition déclarent des marchandises dangereuses ({what}). Nous pouvons "
+    "fr": ("Une remarque : cet envoi contient des marchandises dangereuses ({what}). Nous pouvons "
            "les transporter en tant que telles. Pourriez-vous nous envoyer les documents marchandises dangereuses : la "
            "Shipper's Declaration for Dangerous Goods et la fiche de données de sécurité (MSDS) ? Nous en avons besoin "
            "pour confirmer la réservation."),
-    "es": ("Una nota: sus documentos de envío declaran mercancía peligrosa ({what}). Podemos transportarla como "
+    "es": ("Una nota: este envío contiene mercancía peligrosa ({what}). Podemos transportarla como "
            "mercancía peligrosa. ¿Podría enviarnos los documentos de mercancía peligrosa: la Shipper's Declaration for "
            "Dangerous Goods y la hoja de datos de seguridad (MSDS)? Los necesitamos para confirmar la reserva."),
 }
