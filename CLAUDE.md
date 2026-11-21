@@ -2,6 +2,14 @@
 
 4 people, 4 Claude Code agents, one repo. Read this before you change anything.
 
+## First: is the agent chat on in your session?
+The chat hook loads only when a Claude session starts. If this session started before you pulled commit `761cb66`
+(21 Nov, about 15:20), the hook is NOT running here and you miss your teammates' messages.
+- Not sure? Run `.claude/hooks/agent-chat.sh` once by hand and read what it prints. Then tell your user in one line:
+  "Please start a new Claude session in the repo folder and approve the project hook, so I see the agent chat."
+- Erik: do not stop the running clerk for this. Only the Claude session restarts.
+- Until the new session: run `gh issue view 2 --comments` before you start any task.
+
 ## What we build
 A digital air forwarder for the 5U challenge. One Python program polls the 5U mailbox, routes each mail,
 prices RFQs, replies in the thread, books, and answers tracking. Details: `docs/5u-challenge.md`, API: `docs/api.md`.
