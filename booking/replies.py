@@ -16,18 +16,18 @@ ROLE = {"info", "sales", "logistics", "ops", "operations", "export", "import", "
         "shipping", "office", "contact", "orders", "admin", "team", "cargo", "freight", "einkauf", "versand", "mail"}
 
 GREET = {
-    "en": {"name": ["Hi {NAME},", "Hello {NAME},", "Dear {NAME},", "Good day {NAME},"],
-           "anon": ["Hello,", "Hi there,", "Good day,", "Dear customer,"]},
+    "en": {"name": ["Hi {NAME},", "Hello {NAME},", "Dear {NAME},", "Good morning {NAME},"],
+           "anon": ["Hello,", "Hi there,", "Good morning,", "Hello and thanks for your mail,"]},
     "de": {"name": ["Hallo {NAME},", "Guten Tag {NAME},", "Liebe/r {NAME},", "Hallo {NAME}, danke für Ihre Nachricht."],
            "anon": ["Guten Tag,", "Hallo,", "Sehr geehrte Damen und Herren,"]},
 }
 GREET["de"]["name"][2] = "Guten Tag {NAME},"          # no gendered forms (team rule: never Frau/Herr)
 
+# Signed by a person, the same one who signs the quote (llm/extract.py SIGNER): never "your team", never the customer.
+from llm.extract import SIGNER
 SIGN = {
-    "en": ["Best regards\nYour forwarding team", "Kind regards\nYour forwarding team", "Cheers\nYour forwarding team",
-           "Many thanks and best wishes\nYour forwarding team"],
-    "de": ["Viele Grüße\nIhr Forwarding-Team", "Beste Grüße\nIhr Forwarding-Team", "Freundliche Grüße\nIhr Forwarding-Team",
-           "Herzliche Grüße\nIhr Forwarding-Team"],
+    "en": ["%s\n%s\nAir Export" % (x, SIGNER) for x in ("Best regards", "Kind regards", "Cheers", "Many thanks and best wishes")],
+    "de": ["%s\n%s\nLuftfracht Export" % (x, SIGNER) for x in ("Viele Grüße", "Beste Grüße", "Freundliche Grüße", "Herzliche Grüße")],
 }
 
 BODY = {

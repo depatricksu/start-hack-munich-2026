@@ -110,8 +110,47 @@ def _day(ts):
     return dt.datetime.fromtimestamp(ts).strftime("%d %b %Y") if ts else None
 
 
-def answer_text(b, thread_id=0):
+STATUS_TEXT_DE = {
+    "requested": "bei der Airline angefragt, die Bestätigung steht noch aus",
+    "booked": "bei der Airline gebucht",
+    "confirmed": "gebucht und von der Airline bestätigt",
+    "failed": "noch nicht fertig gebucht, wir sind dran",
+}
+
+
+def _answer_de(b, thread_id=0):
+    """Same facts as the English answer, for a customer who wrote in German."""
+    from llm.extract import CITY, CITY_DE, SIGNER, SIGN_OFF
+    import zlib
+    names = dict(CITY, **CITY_DE)
+    o, d = names.get(b["origin"], b["origin"]), names.get(b["destination"], b["destination"])
+    ref = b["booking_reference"] or b["team_reference"]
+    status = STATUS_TEXT_DE.get(b["status"], b["status"] or "in Arbeit")
+    since = b["confirmed_at"] or b["booked_at"]
+    eta = dt.datetime.fromtimestamp(since + int(b["transit_days"]) * 86400).strftime("%d.%m.%Y") \
+        if since and b["transit_days"] else None
+    kg = ("%g kg " % b["weight_kg"]) if b["weight_kg"] else ""
+    first = "ich habe gerade nachgesehen: Ihre %sSendung von %s nach %s (%s) ist %s, Airline ist %s." % (
+        kg, o, d, ref, status, b["airline"])
+    if eta:
+        first += " Bei rund %s Tagen Laufzeit rechnen wir mit der Ankunft um den %s." % (b["transit_days"], eta)
+    facts = ["Buchungsnummer: %s" % (b["booking_reference"] or "folgt"), "Unsere Referenz: %s" % b["team_reference"],
+             "Strecke: %s nach %s" % (b["origin"], b["destination"]), "Airline: %s" % b["airline"], "Status: %s" % status]
+    if b["weight_kg"]:
+        facts.append("Gewicht: %g kg%s" % (b["weight_kg"], ", %g cbm" % b["volume_cbm"] if b["volume_cbm"] else ""))
+    if since:
+        facts.append("Gebucht am: %s" % dt.datetime.fromtimestamp(b["booked_at"] or since).strftime("%d.%m.%Y"))
+    if eta:
+        facts.append("Voraussichtliche Ankunft: um den %s" % eta)
+    sign = SIGN_OFF["de"][zlib.crc32(str(thread_id).encode()) % len(SIGN_OFF["de"])]
+    return ("Guten Tag,\n\n%s\n\n%s\n\nWenn sich etwas ändert, melde ich mich sofort.\n\n%s\n%s\nLuftfracht Export"
+            % (first, "\n".join(facts), sign, SIGNER))
+
+
+def answer_text(b, thread_id=0, lang="en"):
     """Human first paragraph with the facts in it, then the same facts as short lines (easy to check)."""
+    if lang == "de":
+        return _answer_de(b, thread_id)
     from llm.extract import CITY, SIGNER, SIGN_OFF
     import zlib
     o, d = CITY.get(b["origin"], b["origin"]), CITY.get(b["destination"], b["destination"])
@@ -145,7 +184,15 @@ def answer_text(b, thread_id=0):
 
 NOT_FOUND = ("Hello,\n\nthanks for checking in. I couldn't match your message to one of our bookings yet. "
              "Could you send me the booking reference (BK-...) or our reference (GOOGLE-...)? "
-             "Then I'll reply with the status straight away.\n\nBest regards\nLena Hofmann\nAir Export")
+             "Then I'll reply with the status straight away.\n\nBest regards\n{SIGNER}\nAir Export")
+NOT_FOUND_DE = ("Guten Tag,\n\ndanke für Ihre Nachfrage. Ich konnte Ihre Nachricht noch keiner unserer Buchungen zuordnen. "
+                "Schicken Sie mir bitte die Buchungsnummer (BK-...) oder unsere Referenz (GOOGLE-...)? "
+                "Dann bekommen Sie den Status sofort.\n\nViele Grüße\n{SIGNER}\nLuftfracht Export")
+
+
+def not_found(lang="en"):
+    from llm.extract import SIGNER
+    return (NOT_FOUND_DE if lang == "de" else NOT_FOUND).replace("{SIGNER}", SIGNER)
 
 
 def handle(mail):
@@ -153,7 +200,9 @@ def handle(mail):
     b, how = find_booking(mail["subject"] + "\n" + mail["body"], mail)
     db.event("tracking_lookup", tid, mail["id"], matched=bool(b), how=how,
              booking=b and {k: b[k] for k in ("thread_id", "booking_reference", "status")})
-    body = answer_text(b, tid) if b else NOT_FOUND
+    from llm import lang as langmod
+    lang = langmod.detect(mail["subject"] + "\n" + mail["body"]) or (b and b.get("language")) or "en"   # the customer's language
+    body = answer_text(b, tid, lang) if b else not_found(lang)
     subject = mail["subject"] if mail["subject"].lower().startswith("re:") else "Re: " + mail["subject"]
     ok = mailbox.send(mail["sender"], subject, body, in_reply_to=mail["id"], thread_id=tid)
     db.event("tracking_answered" if ok else "tracking_failed", tid, mail["id"], matched=bool(b), how=how)
