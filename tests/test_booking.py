@@ -229,9 +229,21 @@ class TestPortalErrors(unittest.TestCase):
         self.assertEqual(crm.get(tid)["status"], "failed")
 
     def test_portal_down_goes_to_human(self):
+        """No mail address for the airline: nothing we can do alone."""
         tid = 6200
         self.run_live(tid, [(503, "booking system down, mail the airline")])
         self.assertIn("book by email", db.session(tid)["note"])
+
+    def test_portal_down_books_by_mail_when_we_know_the_airline(self):
+        """5U 21:00 (request 13471): 503 'Booking is not available for Xenon. Please book by email' -> mail the airline."""
+        tid = 6250
+        with mock.patch.dict(handlers.AIRLINE_EMAIL, {"riverbend cargo": "riverbend-cargo@hackloop.mail"}):
+            self.run_live(tid, [(503, {"detail": "Booking is not available for Riverbend Cargo. Please book by email"})])
+        self.assertEqual(db.session(tid)["status"], "booking_requested")       # not needs_human
+        self.assertEqual(crm.get(tid)["status"], "requested")
+        mails = sent(tid)
+        self.assertTrue(any(m["to"] == "riverbend-cargo@hackloop.mail" and "R-test12345678" in m["body"] for m in mails))
+        self.assertTrue(any(m["to"] == CUSTOMER for m in mails[1:]))            # the customer was told
 
     def test_retry_200_counts_as_booked(self):
         tid = 6300
