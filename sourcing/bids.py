@@ -113,6 +113,11 @@ def request(session, fields):
         for c in airlines:
             pending += _ask(tid, c["name"], c["email"], "airline", True, subject, AIR_MAILS, ctx)
         pending += _ask(tid, "Rate desk", RATEDESK, "ratedesk", True, subject, AIR_MAILS, ctx)
+    elif config.BID_ALWAYS:                           # we have a price, but a bid usually beats it: ask carriers + desk and WAIT
+        priced = {x["airline"] for x in options}      # unpriced airlines first: those give us new prices to compare
+        for c in sorted(airlines, key=lambda c: c["name"] in priced)[:config.BID_MAX_CARRIERS]:
+            pending += _ask(tid, c["name"], c["email"], "airline", True, subject, AIR_MAILS, ctx)
+        pending += _ask(tid, "Rate desk", RATEDESK, "ratedesk", True, subject, AIR_MAILS, ctx)
     elif config.BID_EXPERIMENT:                       # learn only: asked, logged, never waited for
         priced = {x["airline"] for x in options}
         for c in sorted(airlines, key=lambda c: c["name"] not in priced)[:3]:
