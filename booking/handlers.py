@@ -152,7 +152,7 @@ def _fresh_rate(chosen, fields):
     status, r = mailbox.api("GET", "/v1/portal/rates", params={
         "origin": chosen["origin"], "destination": chosen["destination"],
         "airline": chosen.get("airline_code") or chosen["airline"],
-        "weight_kg": fields.get("weight_kg_total") or fields.get("weight_kg"),
+        "weight_kg": chosen.get("billed_kg") or fields.get("weight_kg_total") or fields.get("weight_kg"),  # keep the weight break
         "volume_cbm": fields.get("volume_cbm_total") or fields.get("volume_cbm") or 0})
     return r if status == 200 else None
 
