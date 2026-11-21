@@ -22,8 +22,8 @@ def run(label, cmd, env=None):
 
 def checks():
     """Returns (ok, output of the first failing check)."""
-    test_env = dict(os.environ, DRY_RUN="1", LLM_FAKE="1", FIVEU_API_KEY="", BID_EXPERIMENT="1",
-                    DB_PATH=os.path.join(tempfile.mkdtemp(), "check.db"))
+    test_env = dict(os.environ, DRY_RUN="1", LLM_FAKE="1", FIVEU_API_KEY="", BID_EXPERIMENT="1", BID_ALWAYS="0",
+                    DB_PATH=os.path.join(tempfile.mkdtemp(), "check.db"))   # checks use the fast path; the live clerk reads BID_ALWAYS from .env
     test_env.pop("SUPERVISED", None)
     ok, out = run("code imports", [sys.executable, "-c", "import core.main"], test_env)
     if not ok:
