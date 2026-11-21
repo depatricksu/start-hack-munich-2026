@@ -18,6 +18,9 @@ time 15 (full under 2 min). First RFQ Sat 16:00. Setup changes hourly without no
    is needed. Each quote must make exactly one gateway call (no call = no cost points). Set `max_tokens`.
 6. **Log every decision** (mail in, route, all price options, chosen one, mail out) to the shared SQLite DB,
    so we can debug failed quotes with `GET /v1/board/me`.
+7. **GitHub issues are the agent chat.** Run `gh issue list` when you start and after every `git pull`. To tell another
+   agent something, open an issue: say who it is for in the first line, what to do, and the deadline. Answer in the
+   issue and close it when done. Humans still decide who owns what.
 
 ## Folder ownership
 | Folder | What | Owner |
