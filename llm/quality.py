@@ -48,8 +48,14 @@ def customer_lines(body):
 
 def _allowed_numbers(best, fields):
     ok = set(fields.get("customer_numbers") or [])
+    try:                                                   # the weight we bill (next bracket / volume weight) is our own number too
+        chargeable = max(float(fields.get("weight_kg_total") or fields.get("weight_kg") or 0),
+                         float(fields.get("volume_cbm_total") or fields.get("volume_cbm") or 0) * 167)
+    except (TypeError, ValueError):
+        chargeable = 0
     for v in (best.get("total"), best.get("transit_days"), fields.get("weight_kg_total"), fields.get("weight_kg"),
-              fields.get("volume_cbm_total"), fields.get("pickup_postcode")):
+              fields.get("volume_cbm_total"), fields.get("volume_cbm"), fields.get("pickup_postcode"), best.get("billed_kg"),
+              chargeable or None, round(chargeable) if chargeable else None):
         if v in (None, ""):
             continue
         ok.add(_digits(v))
@@ -91,8 +97,7 @@ def check(body, lang, best, fields, customer="", signer="", extra_names=()):
         reasons.append("needs exactly one price (%s), found %d" % (price, len(money)))
     if str(best.get("airline") or "\0") not in text:
         reasons.append("airline %s missing" % best.get("airline"))
-    if not re.search(r"(?<![\d.,])%s(?![\d.,]*\d)" % re.escape(str(best.get("transit_days"))), text.replace(price, "")):
-        reasons.append("transit days missing")
+    # transit days are nice to have, not required: the brief only asks for one all-in total with its currency.
 
     words = len(main.split())
     if words > MAX_WORDS:

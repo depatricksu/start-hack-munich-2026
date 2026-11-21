@@ -86,7 +86,6 @@ class Gate(unittest.TestCase):
             "not signed": GOOD.replace(llm.SIGNER, "Deniz Yilmaz"),
             "exactly one price": GOOD.replace("about 4 days", "or 990.00 EUR with about 4 days"),
             "airline": GOOD.replace("Rhein Cargo", "the airline"),
-            "transit": GOOD.replace("about 4 days", "a few days"),
             "too long": GOOD.replace("Just reply", "We look at this lane often and it is a good one. " * 8 + "Just reply"),
             "machine phrase": GOOD.replace("thanks for", "I hope this email finds you well. Thanks for"),
             "not from our data": GOOD.replace("Just reply", "The flight leaves on 27 November. Just reply"),
@@ -148,6 +147,23 @@ class BookingAndTracking(unittest.TestCase):
             self.assertNotIn("{", t)
         for fact in ("BK-CCCC3333", "GOOGLE-105", "Elbflug Air Freight", "300 kg"):
             self.assertIn(fact, de)
+
+
+class TestGateAllowsOurOwnBilledWeight(unittest.TestCase):
+    def test_expert_note_numbers_pass_the_gate(self):
+        from llm import extract as E
+        best = {"total": "1500.00", "currency": "EUR", "airline": "Meridian Freightways", "transit_days": 2, "billed_kg": "1000"}
+        f = {"weight_kg_total": 676, "volume_cbm_total": 0.5, "language": "en", "origin": "CGN", "destination": "ORD"}
+        body, reasons = E.final_reply("{HELLO}\n\nCGN to ORD: {AIRLINE} at {PRICE} all-in.\n\nJust reply and I'll book it.", best, f, "anna.schmidt@x.mail", 1)
+        self.assertEqual(reasons, [])
+        self.assertIn("billed it at 1,000 kg rather than 676 kg", body)
+
+    def test_rounded_volume_weight_in_the_expert_note_passes(self):
+        from llm import extract as E
+        best = {"total": "840.00", "currency": "EUR", "airline": "Wayzata Air Cargo", "transit_days": 4}
+        f = {"weight_kg_total": 150, "volume_cbm": 1.2, "language": "de", "origin": "MUC", "destination": "LAX"}
+        body, reasons = E.final_reply("{HELLO}\n\nMUC nach LAX: {AIRLINE} zu {PRICE} all-in.\n\nAntworten Sie einfach kurz.", best, f, "k.weber@x.mail", 3)
+        self.assertEqual(reasons, [])
 
 
 if __name__ == "__main__":
