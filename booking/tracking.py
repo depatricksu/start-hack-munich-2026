@@ -78,6 +78,10 @@ def find_booking(text, mail=None):
                    all(re.search(r"\b%s\b" % re.escape(t), low) for t in _name_tokens(r["customer"]))]
     if not by_cust:                                     # company from the domain: auer-maschinenbau.de -> "auer maschinenbau"
         by_cust = [r for r in rows if _company(r["customer"]) and _company(r["customer"]) in re.sub(r"[-_.]", " ", low)]
+    if not by_cust:                                     # one distinctive part of the name is enough when it points to ONE customer
+        hit = [r for r in rows if any(len(t) >= 5 and t in low for t in _name_tokens(r["customer"]))]   # "roesterei" in "Kaffeeroesterei"
+        if len({r["customer"] for r in hit}) == 1:
+            by_cust = hit
     codes = _route_codes(text)
     pool = by_cust or rows
     lane = [r for r in pool if r["origin"] in codes and r["destination"] in codes] if codes else pool if by_cust else []
