@@ -5,6 +5,7 @@
 """
 import json, os
 from decimal import Decimal
+from concurrent.futures import ThreadPoolExecutor
 from core import config, mailbox
 
 import time
@@ -105,12 +106,14 @@ def options(origin, destination, weight_kg, volume_cbm=0, weight_break=None):
     except Exception as e:                              # never let a refresh break a quote
         _log("portal_refresh_error", error=str(e))
     airlines = LANES.get((origin, destination), [])
-    for a in airlines:
-        o = _rate(origin, destination, a["code"], weight_kg, volume_cbm)
-        if o == "limit":
-            return out
-        if o:
-            out.append(o)
+    # Base bracket: one read per airline, fired in parallel (independent GETs) so the quote is faster.
+    rated = []
+    if airlines:
+        with ThreadPoolExecutor(max_workers=min(len(airlines), 8)) as ex:
+            rated = list(ex.map(lambda a: _rate(origin, destination, a["code"], weight_kg, volume_cbm), airlines))
+    if "limit" in rated:                                  # hit the per-minute rate limit: keep hits, skip the weight-break
+        use_break = False
+    out.extend(o for o in rated if o and o != "limit")
     if use_break:
         # Round 9: nobody got full price points, our next-bracket price was > 5 % above the best -> look deeper.
         # Pass 1 = the next bracket for every airline. Then, per airline, keep climbing one bracket at a time while
