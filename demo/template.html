@@ -1,0 +1,272 @@
+<meta charset="utf-8">
+<title>After the Yes</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one shipment record on the left feeds ten systems on the right, grouped in three phases; click a system to read what it got. */
+:root{
+  --bg:#eef1f4; --panel:#ffffff; --ink:#17212b; --mute:#5b6876; --line:#d5dbe2;
+  --accent:#c2410c; --accent-soft:#fde7d9;
+  --green:#1f7a4d; --green-soft:#dcf1e5; --pink:#b4235a; --pink-soft:#fbe1ea; --blue:#1d5fa8; --blue-soft:#dde9f7;
+  --amber:#a15c00; --amber-soft:#fbeccf; --code:#f5f7f9;
+  --display:"Archivo",system-ui,sans-serif; --body:"IBM Plex Sans",system-ui,sans-serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#10161c; --panel:#18212a; --ink:#e6ebf0; --mute:#97a4b2; --line:#2a3642;
+  --accent:#fb8a4c; --accent-soft:#3a2216;
+  --green:#5fd39a; --green-soft:#16301f; --pink:#f483ad; --pink-soft:#3a1626; --blue:#7fb4f0; --blue-soft:#142a42;
+  --amber:#f2b552; --amber-soft:#382a10; --code:#121a21; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#10161c; --panel:#18212a; --ink:#e6ebf0; --mute:#97a4b2; --line:#2a3642;
+  --accent:#fb8a4c; --accent-soft:#3a2216;
+  --green:#5fd39a; --green-soft:#16301f; --pink:#f483ad; --pink-soft:#3a1626; --blue:#7fb4f0; --blue-soft:#142a42;
+  --amber:#f2b552; --amber-soft:#382a10; --code:#121a21; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:15px/1.55 var(--body);margin:0}
+.wrap{max-width:1180px;margin:0 auto;padding-block:28px 56px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:grid;gap:28px}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;margin:0;line-height:1.15}
+h1{font-size:clamp(28px,4.4vw,44px);font-weight:800;letter-spacing:-.01em}
+h2{font-size:20px;font-weight:700}
+h3{font-size:15px;font-weight:700}
+.eyebrow{font:500 12px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+.lede{max-width:68ch;color:var(--mute);font-size:17px;margin:10px 0 0}
+.mono{font-family:var(--mono)}
+.head{display:grid;gap:14px}
+.legend{display:flex;flex-wrap:wrap;gap:8px 16px;font-size:13px;color:var(--mute)}
+.chip{display:inline-flex;align-items:center;gap:6px;font:500 11px/1 var(--mono);padding:5px 8px;border-radius:4px;letter-spacing:.03em;white-space:nowrap}
+.c-real{background:var(--green-soft);color:var(--green)}
+.c-demo{background:var(--accent-soft);color:var(--accent)}
+.c-human{background:var(--amber-soft);color:var(--amber)}
+.c-sample{background:var(--blue-soft);color:var(--blue)}
+
+.stage{display:grid;grid-template-columns:minmax(0,340px) minmax(0,1fr);gap:24px;align-items:start}
+@media (max-width:900px){.stage{grid-template-columns:minmax(0,1fr)}}
+
+/* the shipment record, styled like a house air waybill copy */
+.record{background:var(--panel);border:1px solid var(--line);border-radius:6px;overflow:hidden;position:sticky;top:calc(env(safe-area-inset-top,0px) + 12px)}
+@media (max-width:900px){.record{position:static}}
+.record-top{display:flex;justify-content:space-between;align-items:baseline;padding:14px 16px;border-bottom:2px solid var(--ink);gap:8px;flex-wrap:wrap}
+.record-top b{font:700 18px var(--display)}
+.lane{font:700 30px/1 var(--display);letter-spacing:.02em;padding:14px 16px 4px}
+.lane span{color:var(--mute);font-weight:500}
+.boxes{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid var(--line)}
+.box{padding:8px 16px;border-bottom:1px solid var(--line);min-width:0}
+.box:nth-child(odd){border-right:1px solid var(--line)}
+.box.full{grid-column:1/-1;border-right:0}
+.box small{display:block;font:500 10px/1.4 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--mute)}
+.box div{font-family:var(--mono);font-size:13.5px;overflow-wrap:anywhere}
+.box.lit{background:var(--accent-soft)}
+.box.lit small{color:var(--accent)}
+.record-foot{padding:12px 16px;font-size:13px;color:var(--mute);display:grid;gap:10px}
+.mail{background:var(--code);border:1px solid var(--line);border-radius:4px;padding:10px 12px;font-size:13px;color:var(--ink)}
+.mail b{font-weight:600}
+
+/* phases */
+.flow{display:grid;gap:22px;min-width:0}
+.controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+.clock{font:500 14px var(--mono);color:var(--mute)}
+.clock b{color:var(--ink);font-size:20px}
+button{font:600 14px var(--body);border-radius:5px;border:1px solid var(--ink);background:var(--ink);color:var(--panel);padding:9px 16px;cursor:pointer}
+button.ghost{background:transparent;color:var(--ink)}
+button:focus-visible,.sys:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.phase{display:grid;gap:10px}
+.phase-h{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.phase-h .when{font:500 12px var(--mono);color:var(--mute)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+.sys{all:unset;box-sizing:border-box;cursor:pointer;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px 14px;display:grid;gap:6px;align-content:start;transition:border-color .2s,transform .2s,opacity .3s}
+.sys:hover{border-color:var(--mute)}
+.sys[aria-pressed="true"]{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.sys .to{font:500 11px var(--mono);color:var(--mute);letter-spacing:.03em}
+.sys .t{font:600 15px/1.3 var(--body)}
+.sys .row{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.sys .ts{font:500 12px var(--mono);color:var(--mute)}
+.sys.wait{opacity:.38}
+.sys.flash{transform:translateY(-2px);border-color:var(--accent)}
+
+/* detail pane */
+.detail{background:var(--panel);border:1px solid var(--line);border-radius:6px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+@media (max-width:760px){.detail{grid-template-columns:minmax(0,1fr)}}
+.detail>div{padding:18px;min-width:0}
+.detail>div+div{border-left:1px solid var(--line)}
+@media (max-width:760px){.detail>div+div{border-left:0;border-top:1px solid var(--line)}}
+.detail h3{font-size:19px;margin-bottom:6px}
+.detail p{margin:6px 0}
+.kv{display:grid;gap:8px;margin-top:12px;font-size:14px}
+.kv dt{font:500 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--mute)}
+.kv dd{margin:0}
+.out{background:var(--code);border:1px solid var(--line);border-radius:4px;padding:14px;font:13px/1.6 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;max-height:440px;overflow:auto}
+.f{background:var(--accent-soft);color:var(--accent);border-radius:2px;padding:0 2px}
+.s{background:var(--blue-soft);color:var(--blue);border-radius:2px;padding:0 2px}
+.h{background:var(--amber-soft);color:var(--amber);border-radius:2px;padding:0 2px}
+.out-h{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;flex-wrap:wrap}
+.out-h span{font:500 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--mute)}
+
+/* numbers + research */
+.band{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+@media (max-width:760px){.band{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.band div{background:var(--panel);padding:16px}
+.band b{display:block;font:800 30px/1.1 var(--display);font-variant-numeric:tabular-nums}
+.band span{font-size:13px;color:var(--mute)}
+.two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:24px}
+@media (max-width:860px){.two{grid-template-columns:minmax(0,1fr)}}
+.say{background:var(--ink);color:var(--panel);border-radius:6px;padding:22px}
+.say q{font:700 21px/1.35 var(--display);display:block;quotes:"\201C" "\201D"}
+.say p{margin:12px 0 0;font-size:14px;opacity:.8}
+.tbl{width:100%;border-collapse:collapse;font-size:13.5px;min-width:520px}.tbl th{font:500 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--mute);text-align:left;padding:6px 8px;border-bottom:2px solid var(--ink)}.tbl td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}.tbl td.y{color:var(--green);font-weight:600}.tbl td.p{color:var(--amber);font-weight:600}
+.facts{display:grid;gap:12px;margin:0;padding:0;list-style:none;font-size:14px}
+.facts li{padding-left:14px;border-left:2px solid var(--line)}
+.facts a{color:var(--blue)}
+@media (prefers-reduced-motion:reduce){.sys{transition:none}}
+</style>
+<style>
+select{font:500 14px var(--body);padding:8px 10px;border-radius:5px;border:1px solid var(--line);background:var(--panel);color:var(--ink);max-width:100%}
+.picker{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.picker label{font:500 12px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--mute)}
+</style>
+<div class="wrap">
+  <header class="head">
+    <div class="eyebrow">Team Google · 5U AI challenge · pitch demo</div>
+    <h1>The customer said yes. Who tells everyone else?</h1>
+    <p class="lede">Our agent talks to the customer on its own: quote, booking, tracking. After the yes a forwarder still writes about seven more messages by hand, to the trucker, the airline, the carriers who lost, the partner at destination and the customer, although every detail is already in the record. Everything below is generated from the running agent's own database, read-only. Nothing is sent.</p>
+    <div class="legend">
+      <span><span class="chip c-real">REAL</span> from the agent's database</span>
+      <span><span class="chip c-demo">CONCEPT</span> drafted, not sent</span>
+      <span><span class="f" style="padding:1px 5px;border-radius:3px">orange</span> field from our record</span>
+      <span><span class="h" style="padding:1px 5px;border-radius:3px">amber</span> still open, or a person decides</span>
+    </div>
+    <div class="picker"><label for="pick">Booking</label><select id="pick"></select><span class="clock" id="src"></span></div>
+  </header>
+
+  <section class="stage">
+    <aside class="record" aria-label="Shipment record">
+      <div class="record-top"><b>Shipment record</b><span class="chip c-real" id="refchip">REAL</span></div>
+      <div class="lane" id="lane"></div>
+      <div class="boxes" id="boxes"></div>
+      <div class="record-foot" id="foot"></div>
+    </aside>
+    <div class="flow">
+      <div class="controls">
+        <div class="clock">Clock <b id="clock">all done</b></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button id="play" type="button">Play from the yes</button>
+          <button id="all" type="button" class="ghost">Show all</button>
+        </div>
+      </div>
+      <div id="phases"></div>
+      <section class="detail" id="detail" aria-live="polite"></section>
+    </div>
+  </section>
+
+  <section class="band" id="band" aria-label="Numbers"></section>
+
+  <section class="two">
+    <div>
+      <h2 style="margin-bottom:12px">Research: what a forwarder does after the yes</h2>
+      <div style="overflow-x:auto">
+      <table class="tbl">
+        <thead><tr><th>Step</th><th>Who gets a message</th><th>Data they need</th><th>In our record?</th></tr></thead>
+        <tbody>
+          <tr><td>Arrange pickup day and time</td><td>Trucker, shipper</td><td>address, ready date, pieces, weight</td><td class="y">yes</td></tr>
+          <tr><td>Confirm booking with paperwork</td><td>Airline</td><td>shipper, pieces, weight, volume, goods, DG</td><td class="y">yes</td></tr>
+          <tr><td>Close the bid round</td><td>Carriers not chosen</td><td>lane, our reference</td><td class="y">yes</td></tr>
+          <tr><td>Collect SLI, invoice, packing list</td><td>Customer</td><td>which fields are still open</td><td class="y">yes</td></tr>
+          <tr><td>Pre-alert</td><td>Destination partner</td><td>flight, pieces, goods, HS code, consignee</td><td class="p">after the invoice</td></tr>
+          <tr><td>Status: at airport, departed, delayed, arrived</td><td>Customer</td><td>booking ref, transit, language</td><td class="y">yes</td></tr>
+        </tbody>
+      </table>
+      </div>
+      <ul class="facts" style="margin-top:16px">
+        <li>The usual export order: the forwarder arranges pickup with the shipper, books space, and confirms the booking by sending the required documents to the airline; the shipper sends a Shipper's Letter of Instruction. <a href="https://www.dhl.com/de-en/home/global-forwarding/freight-forwarding-education-center/air-cargo-shipping-process.html" target="_blank" rel="noopener">DHL Global Forwarding</a></li>
+        <li>43% of 800+ surveyed forwarding staff spend over 40% of their time on manual work. <a href="https://www.descartes.com/resources/blog/real-cost-disconnected-freight-forwarding-systems" target="_blank" rel="noopener">Descartes</a></li>
+        <li>Proactive status alerts are claimed to cut "where is my cargo?" mails by about 70% (vendor figure, not audited). <a href="https://www.searates.com/blog/post/reducing-where-is-my-cargo-emails-by-70-with-automated-alerts" target="_blank" rel="noopener">SeaRates</a></li>
+        <li>EU air cargo filings need a 6-digit HS code and a precise description per item, so the agent asks for the invoice right after the yes. <a href="https://www.fedex.com/en-ee/service-news/ics2.html" target="_blank" rel="noopener">FedEx on ICS2</a></li>
+      </ul>
+    </div>
+    <div style="display:grid;gap:16px;align-content:start">
+      <div class="say">
+        <div class="eyebrow" style="color:inherit;opacity:.7">Line for the pitch</div>
+        <q>Today a forwarder gets the yes and then types the same shipment into seven more mails. Our agent already has every field, so it writes them: the truck is ordered, the airline has the details, the losing bidders are thanked, and the customer hears about every step in her own language.</q>
+        <p>Same rule as tonight: code fills in the facts, the AI writes the words, a person approves anything that changes money or dates.</p>
+      </div>
+      <div class="mail" style="font-size:14px;line-height:1.5"><b>Why this fits 5U's brief:</b> "one mailbox that quotes, books and tracks on its own". These are the mails the same mailbox would send next. No new system, no new data.</div>
+    </div>
+  </section>
+</div>
+
+<script>
+const DATA = /*DATA*/null;
+const PH = ["Seconds after the yes", "Before pickup", "On the move"];
+const BOXES = [["shipper","Shipper",1],["pickup","Pickup"],["ready","Ready"],["pieces","Pieces"],["weight","Gross / vol."],["goods","Goods"],["dg","DG"],["airline","Airline"],["booking","Booking"],["trucker","Trucker"],["transit","Transit"],["cost","Flight + truck"],["lang","Language"]];
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let cur = null, sel = null, timer = null;
+
+function boot(){
+  if (!DATA){ $("#phases").innerHTML = "<p>No data. Run <code>python3 -m demo.after_yes</code>.</p>"; return; }
+  const st = DATA.stats;
+  $("#src").textContent = `${st.bookings} confirmed bookings · ${st.db} · ${st.generated}`;
+  $("#pick").innerHTML = DATA.shipments.map((s,i) => `<option value="${i}">${esc(s.ref)} · ${esc(s.lane)} · ${esc(s.record.shipper.split(" · ")[0])}</option>`).join("");
+  $("#pick").addEventListener("change", e => show(+e.target.value));
+  $("#band").innerHTML = [
+    [st.bookings, "bookings the agent confirmed with no person involved"],
+    [st.messages, "follow-up messages drafted from those records"],
+    [st.trucked, "bookings with a truck pickup that need a pickup order"],
+    [st.bidders, "bookings where losing bidders never heard back"]
+  ].map(([n,t]) => `<div><b>${n}</b><span>${t}</span></div>`).join("");
+  show(0);
+}
+function show(i){
+  showAll(); cur = DATA.shipments[i]; const r = cur.record;
+  $("#refchip").textContent = "REAL · " + cur.ref;
+  $("#lane").innerHTML = `${esc(cur.origin)} <span>→</span> ${esc(cur.destination)}`;
+  $("#boxes").innerHTML = BOXES.map(([k,l,full]) => `<div class="box${full?" full":""}" data-k="${k}"><small>${l}</small><div>${esc(r[k])}</div></div>`).join("");
+  $("#foot").innerHTML = `<div class="mail"><b>${esc(cur.request_at)}</b> "${esc(cur.request.replace(/\s+/g," ").slice(0,170))}…"</div>`
+    + (cur.yes ? `<div class="mail"><b>${esc(cur.yes_at)}</b> "${esc(cur.yes)}"</div>` : "")
+    + `<div>Customer price <b class="mono">${esc(cur.price)}</b>${cur.to_confirmed ? ` · request to confirmed booking <b class="mono">${Math.floor(cur.to_confirmed/60)} min ${cur.to_confirmed%60} s</b>` : ""}. Today the agent stops here.</div>`;
+  $("#phases").innerHTML = PH.map((name,p) => {
+    const items = cur.messages.filter(m => m.phase === p); if (!items.length) return "";
+    return `<section class="phase"><div class="phase-h"><h2>${name}</h2></div><div class="grid">${items.map(m => `
+      <button class="sys" type="button" id="s-${m.id}" data-id="${m.id}">
+        <span class="row"><span class="to">${esc(m.to)}</span><span class="ts">${esc(m.at)}</span></span>
+        <span class="t">${esc(m.title)}</span>
+        <span class="row"><span class="chip c-demo">${esc(m.tag)}</span></span>
+      </button>`).join("")}</div></section>`;
+  }).join("");
+  document.querySelectorAll(".sys").forEach(b => b.addEventListener("click", () => select(b.dataset.id)));
+  select(cur.messages[0].id);
+}
+function select(id){
+  sel = id; const m = cur.messages.find(x => x.id === id);
+  document.querySelectorAll(".sys").forEach(b => b.setAttribute("aria-pressed", b.dataset.id === id));
+  document.querySelectorAll(".box").forEach(b => b.classList.toggle("lit", m.uses.includes(b.dataset.k)));
+  $("#detail").innerHTML = `
+    <div><div class="eyebrow">${esc(m.to)}</div><h3 style="margin-top:6px">${esc(m.title)}</h3>
+      <dl class="kv">
+        <div><dt>Who gets it</dt><dd>${esc(m.who)}</dd></div>
+        <div><dt>What the AI does</dt><dd>${esc(m.ai)}</dd></div>
+        <div><dt>How a forwarder does it today</dt><dd>${esc(m.today)}</dd></div>
+        <div><dt>Fields reused from the record</dt><dd>${m.uses.length} of 13, highlighted on the left. Nothing typed again.</dd></div>
+      </dl></div>
+    <div><div class="out-h"><span>What the agent would send</span><span class="chip c-demo">DRAFT · NOT SENT</span></div>
+      <div class="out">${m.out}</div></div>`;
+}
+function showAll(){
+  clearInterval(timer); timer = null;
+  document.querySelectorAll(".sys").forEach(b => b.classList.remove("wait","flash"));
+  $("#clock").textContent = "all done"; $("#play").textContent = "Play from the yes";
+}
+function play(){
+  if (timer){ showAll(); return; }
+  const ms = cur.messages; document.querySelectorAll(".sys").forEach(b => b.classList.add("wait"));
+  $("#play").textContent = "Stop"; let k = 0; $("#clock").textContent = (cur.yes_at || "") + " yes";
+  timer = setInterval(() => {
+    if (k >= ms.length){ showAll(); return; }
+    const m = ms[k++], b = $("#s-"+m.id);
+    b.classList.remove("wait"); b.classList.add("flash"); setTimeout(() => b.classList.remove("flash"), 500);
+    $("#clock").textContent = m.at; select(m.id);
+  }, 1500);
+}
+$("#play").addEventListener("click", play);
+$("#all").addEventListener("click", showAll);
+boot();
+</script>
