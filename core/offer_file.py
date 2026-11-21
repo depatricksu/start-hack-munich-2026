@@ -13,9 +13,16 @@ attached too. A customer who says "no attachments please" gets none.
 """
 import base64, datetime, io, re, textwrap, zipfile
 
-OURS = (r"(?:your|ihr\w*|votre|vos|vostr\w+|tu[ao]?|su|sus|uw|您的|贵司|貴社)\s+(?:\w+\s+){0,2}?(?:offer|quot\w*|price|reply|answer|response|"
+# "attach YOUR offer as a PDF" and "attach THE offer as a PDF when you reply" (round 78 said "the": the file went out,
+# but the mail did not mention it). "Our request is attached as a PDF file" has neither an offer word nor a reply word.
+OURS = (r"(?:your|the|an?|ihr\w*|das|ein|votre|vos|l'|une?|vostr\w+|la|un[ao]?|tu[ao]?|su|sus|uw|de|een|您的|贵司|貴社)\s*(?:\w+\s+){0,2}?(?:offer|quot\w*|price|reply|answer|response|"
         r"angebot\w*|preis\w*|antwort|offre|devis|prix|tarif|r[ée]ponse|offerta|preventivo|prezzo|risposta|oferta|cotizaci[óo]n|"
         r"precio|respuesta|offerte|prijs)|报价|報價|見積")
+# A sentence about THEIR file is never a wish for ours: "please find our request for an air freight quotation attached,
+# as a Word document (quotation-request.docx)".
+THEIRS = re.compile(r"(?:our|my|unsere?\w*|meine?\w*|notre|nos|nostr\w+|nuestr\w+)\s+(?:\w+\s+){0,2}?(?:request|rfq|inquiry|enquiry|"
+                    r"anfrage|demande|richiesta|solicitud)|please find|find (?:the )?attached|i recorded|anbei|im anhang finden|"
+                    r"ci-joint|veuillez trouver|in allegato trov|adjunt[oa] (?:encontrar|le env)", re.I)
 FORMATS = (("docx", re.compile(r"(?<![a-z])(?:word|docx?)(?![a-z])", re.I)),
            ("txt", re.compile(r"\btext[\s-]?(?:file|datei)\b|\btextdatei\b|\b\.?txt\b|fichier texte|file di testo|archivo de texto", re.I)),
            ("pdf", re.compile(r"(?<![a-z])pdf(?![a-z])", re.I)))     # no \b: in 以PDF附件 the neighbours are letters too
@@ -39,7 +46,7 @@ def requested(request_text):
     """Formats the customer asks OUR offer in: {"pdf"}, {"docx"}, ... Empty when they did not ask."""
     out, ours = set(), re.compile(OURS, re.I)
     for sentence in re.split(r"(?<=[.!?。！？])\s+|\n", own_words(request_text)):
-        if ours.search(sentence):
+        if ours.search(sentence) and not THEIRS.search(sentence):
             out |= {name for name, rx in FORMATS if rx.search(sentence)}
     return out
 
