@@ -34,11 +34,9 @@ Key info collected from the event Discord on Sat 21 Nov 2026.
 - **Prize:** fly a real plane yourself ✈️ + €300 / €200 / €100 from START Munich for the top 3.
 - **Material:** 5U AI pitch slides (guidebook → Challenges) and deep-dive PDF in #5u-ai. Full brief in the Hack League app.
 
-### Agent plan (draft)
-- Loop: poll mailbox → classify + extract (origin, destination, cargo, weight/volume, dates, incoterms) → price → draft reply → send or escalate.
-- Escalate when: missing data, unusual cargo (dangerous goods, oversize), low confidence, price outside normal range.
-- Demo UI: live inbox on the left, agent reasoning + action on the right, human review queue.
-- Models: Claude Sonnet for decisions/replies, Haiku for classification/translation (high volume).
+**Full challenge breakdown: [docs/5u-challenge.md](docs/5u-challenge.md)**
+
+> ⚠️ Agent LLM calls must go through 5U's **LLM gateway (OpenAI models only)**. Quotes without a gateway call get no cost points. Claude Code is fine as a *coding tool*.
 
 ## Other challenges (for reference)
 
