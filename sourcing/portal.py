@@ -15,6 +15,8 @@ LANES = {(l["origin"], l["destination"]): l["airlines"] for l in json.load(open(
 # 5U changes the setup about once an hour without notice. Lanes and weight breaks are free to read (not rate
 # limited), so we re-read them every few minutes instead of trusting this morning's copy, and log every difference.
 REFRESH_S = float(os.environ.get("PORTAL_REFRESH_S", "180"))
+BREAK_DEPTH = int(os.environ.get("PORTAL_BREAK_DEPTH", "4"))          # how many higher brackets we may try
+BREAK_TOLERANCE = float(os.environ.get("PORTAL_BREAK_TOLERANCE", "0.10"))  # keep climbing while within 10 %
 _lanes_at = 0.0
 _BREAKS = {}                     # airline code -> (read_at, weight breaks)
 
@@ -103,15 +105,34 @@ def options(origin, destination, weight_kg, volume_cbm=0, weight_break=None):
         if o:
             out.append(o)
     if use_break:
+        # Round 9: nobody got full price points, our next-bracket price was > 5 % above the best -> look deeper.
+        # Pass 1 = the next bracket for every airline. Then, per airline, keep climbing one bracket at a time while
+        # the last climb was cheaper (or within BREAK_TOLERANCE of the best so far), up to BREAK_DEPTH brackets.
+        # Cheapest-first order, so the rate limit (429) only ever drops the least promising reads.
         chargeable = max(float(weight_kg), float(volume_cbm or 0) * 167)
-        for a in airlines:
-            nxt = [b for b in _breaks(a["code"]) if b > chargeable]
-            if not nxt:
-                continue
-            o = _rate(origin, destination, a["code"], nxt[0], volume_cbm)
-            if o == "limit":
-                break
-            if o:
+        eur = lambda o: float(o["total_eur"])
+        best = {}                                        # airline code -> best total_eur so far
+        for o in out:
+            c = o.get("airline_code")
+            best[c] = min(best.get(c, 1e18), eur(o))
+        ladders = {a["code"]: [b for b in _breaks(a["code"]) if b > chargeable][:BREAK_DEPTH] for a in airlines}
+        level = {c: 0 for c in ladders}
+        live = [c for c in ladders if ladders[c]]
+        while live:
+            live.sort(key=lambda c: best.get(c, 1e18))  # most promising airline first
+            nxt_live = []
+            for c in live:
+                o = _rate(origin, destination, c, ladders[c][level[c]], volume_cbm)
+                if o == "limit":
+                    return out
+                level[c] += 1
+                if not o:
+                    continue
                 o["weight_break"] = True
                 out.append(o)
+                prev = best.get(c, 1e18)
+                best[c] = min(prev, eur(o))
+                if level[c] < len(ladders[c]) and eur(o) <= prev * (1 + BREAK_TOLERANCE):
+                    nxt_live.append(c)                   # still getting cheaper (or close): try the next bracket
+            live = nxt_live
     return out
