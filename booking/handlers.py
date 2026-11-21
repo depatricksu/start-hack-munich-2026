@@ -25,6 +25,11 @@ _KIT = os.path.join(config.ROOT, "kit", "start-kit")
 AIRLINE_EMAIL = {r["name"].lower(): r["email"] for r in csv.DictReader(open(os.path.join(_KIT, "carrier-list.csv")))
                  if r["kind"] == "airline"}
 # A fresh rate may cost more than what we quoted. Above this we do not book on our own.
+# Who may confirm a booking: the airlines and truckers of the start kit, nobody else (a customer can fake the subject).
+CARRIER_SENDERS = {r["email"].lower() for r in csv.DictReader(open(os.path.join(_KIT, "carrier-list.csv")))}
+# The real confirmation sender is not seen yet (first booking after 16:00). If it is a portal address, add it here.
+CARRIER_SENDERS |= {x.strip().lower() for x in os.environ.get("CONFIRM_SENDERS", "").split(",") if x.strip()}
+_SYSTEM_SENDER = re.compile(r"^(no-?reply|portal|bookings?|confirm\w*|ratedesk)@hackloop\.mail$")
 MAX_REPRICE = Decimal(os.environ.get("BOOK_MAX_REPRICE", "1.05"))
 # A call with our forwarder costs a person's time: only offer it from this quote size up (EUR). Below: mail only.
 MEETING_MIN_EUR = Decimal(os.environ.get("MEETING_MIN_EUR", "1500"))
@@ -43,6 +48,14 @@ TEAM_REF = re.compile(r"\bGOOGLE-\d+\b")
 
 
 
+# A yes with a condition or new facts is not a yes: "but", "next week", "don't book yet", a new weight or price.
+CONDITION = re.compile(r"\b(but|however|only if|as long as|unless|later|next week|tomorrow|not yet|don'?t|do not|wait|"
+                       r"first|as agreed|you (said|quoted|promised)|aber|nur wenn|sofern|später|nächste woche|morgen|"
+                       r"noch nicht|nicht buchen|warten|erst|wie besprochen|vereinbart|mais|pero|però)\b", re.I)
+NEW_FACTS = re.compile(r"\d[\d.,]*\s*(kg|kgs|lbs?|t\b|tons?|tonnen|cbm|m3|m³|eur|€|usd|\$|chf|pcs|pieces|pallets?|"
+                       r"paletten|colli)|(eur|€|\$|usd)\s*\d", re.I)
+
+
 def classify(body):
     """accept / decline / better_price / unclear. Only the customer's new text counts, not our quoted mail below it."""
     text = re.split(r"\n\s*(>|On .+wrote:|Am .+schrieb)", body or "", maxsplit=1)[0]
@@ -50,7 +63,7 @@ def classify(body):
         return "decline"
     if PRICE.search(text):
         return "better_price"
-    if ACCEPT.search(text) and not QUESTION.search(text):
+    if ACCEPT.search(text) and not QUESTION.search(text) and not CONDITION.search(text) and not NEW_FACTS.search(text):
         return "accept"
     return "unclear"
 
@@ -194,6 +207,8 @@ def handle_follow_up(mail):
     s = db.session(tid)
     if not s or s["status"] not in ("quoted", "meeting_proposed"):
         return db.event("follow_up_ignored", tid, mail["id"], status=s and s["status"])
+    if mail["sender"] != (s["customer"] or "").lower():          # only the customer who asked can book on this quote
+        return _needs_human(tid, mail["id"], "reply from %s, not from the customer %s" % (mail["sender"], s["customer"]))
     verdict = classify(mail["body"])
     db.event("follow_up", tid, mail["id"], verdict=verdict, status=s["status"])
     if s["status"] == "meeting_proposed" and verdict != "decline":   # "Tue 10:00, please confirm" is not a booking
@@ -237,9 +252,17 @@ def handle_follow_up(mail):
 
 
 def handle_booking_confirmation(mail):
+    if mail["sender"] not in CARRIER_SENDERS and not _SYSTEM_SENDER.match(mail["sender"]):                    # customers and strangers cannot confirm bookings
+        return db.event("confirmation_rejected_sender", mail["thread_id"], mail["id"], sender=mail["sender"])
     text = mail["subject"] + "\n" + mail["body"]
     ref, team = BK.search(text), TEAM_REF.search(text)
     b = crm.find(ref and ref.group(0), team and team.group(0))
+    if b and b["booking_reference"] and ref and ref.group(0) != b["booking_reference"]:
+        b = None                                                 # portal booking: the BK number must match ours
+    if b and b["status"] not in ("booked", "requested", "confirmed"):
+        b = None
+    if b and b["status"] == "requested" and mail["sender"] != AIRLINE_EMAIL.get((b["airline"] or "").lower()):
+        b = None                                                 # mail booking: only the airline we asked confirms
     if not b:
         return db.event("confirmation_unmatched", mail["thread_id"], mail["id"], subject=mail["subject"])
     if b["status"] == "confirmed":

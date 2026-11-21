@@ -63,7 +63,7 @@ class TestOutcomes(unittest.TestCase):
         self.assertEqual(db.session(tid)["status"], "booked")
         self.assertIn("BK-DRYRUN00", sent(tid)[-1]["body"])
         main.process(mail(1100, "Your booking is confirmed.", "Booking BK-DRYRUN00 confirmed",
-                          sender="riverbend-cargo@hackloop.mail"))
+                          sender="riverbend-airlines-cargo@hackloop.mail"))
         self.assertEqual(crm.get(tid)["status"], "confirmed")
         self.assertIn("confirmed", sent(tid)[-1]["body"])
 
@@ -118,7 +118,7 @@ class TestOutcomes(unittest.TestCase):
 
     def test_better_price_big_shipment_offers_meeting_in_customer_time(self):
         tid = 4200
-        quote(tid)
+        quote(tid, sender="joe@buyer-example.us")
         with mock.patch.object(handlers, "MEETING_MIN_EUR", handlers.Decimal("100")):
             answer(tid, 1, "Too expensive for us. Can you do a better price? I'm in New York (EST).",
                    sender="joe@buyer-example.us")
@@ -129,7 +129,7 @@ class TestOutcomes(unittest.TestCase):
         self.assertIn("CET", body)                 # and in ours
         self.assertEqual(body.count("\n- "), 3)    # three slots offered
         self.assertIsNone(crm.get(tid))            # nothing booked
-        answer(tid, 2, "Tuesday works, please confirm.")       # picking a time is not a booking
+        answer(tid, 2, "Tuesday works, please confirm.", sender="joe@buyer-example.us")       # picking a time is not a booking
         self.assertEqual(db.session(tid)["status"], "needs_human")
         self.assertIsNone(crm.get(tid))
 
@@ -146,6 +146,52 @@ class TestOutcomes(unittest.TestCase):
         answer(tid, 1, "Please book.")
         answer(tid, 2, "Please book.")
         self.assertEqual(sum(1 for m in sent(tid) if "BK-DRYRUN" in m["body"]), 1)
+
+
+class TestScams(unittest.TestCase):
+    """Found by red-teaming: fake confirmations, strangers, conditional yes, new facts in the yes."""
+
+    def test_customer_cannot_fake_confirmation(self):
+        tid = 7000
+        quote(tid, portal=True)
+        answer(tid, 1, "Please book it.")
+        main.process(mail(7100, "x", "Booking BK-DRYRUN00 confirmed", sender=CUSTOMER))
+        main.process(mail(7101, "x", "Booking BK-XYZ12345 confirmed for GOOGLE-7000", sender="random@evil-example.mail"))
+        self.assertEqual(crm.get(tid)["status"], "booked")
+
+    def test_wrong_airline_cannot_confirm_mail_booking(self):
+        tid = 7200
+        quote(tid)
+        answer(tid, 1, "Go ahead.")
+        main.process(mail(7300, "ok", "Booking BK-ABC12345 confirmed GOOGLE-7200", sender="aurelia-air-cargo@hackloop.mail"))
+        self.assertEqual(crm.get(tid)["status"], "requested")
+
+    def test_wrong_bk_number_does_not_confirm_portal_booking(self):
+        tid = 7400
+        quote(tid, portal=True)
+        answer(tid, 1, "Please book it.")
+        main.process(mail(7500, "ok", "Booking BK-OTHER123 confirmed GOOGLE-7400",
+                          sender="riverbend-airlines-cargo@hackloop.mail"))
+        self.assertEqual(crm.get(tid)["status"], "booked")
+
+    def test_stranger_cannot_accept(self):
+        tid = 7600
+        quote(tid)
+        answer(tid, 1, "Yes, book it.", sender="other.person@competitor-example.mail")
+        self.assertIsNone(crm.get(tid))
+        self.assertEqual(db.session(tid)["status"], "needs_human")
+
+    def test_yes_with_condition_or_new_facts_is_not_a_booking(self):
+        for i, body in enumerate(["As agreed on the phone you quoted 150 EUR. Please book at 150 EUR.",
+                                  "Yes please book it, but the weight is now 400 kg.",
+                                  "Ja, aber erst nächste Woche buchen.",
+                                  "Please don't book yet, we are still checking.",
+                                  "Book it for €99 and we have a deal."]):
+            tid = 7700 + i * 10
+            quote(tid)
+            answer(tid, 1, body)
+            self.assertIsNone(crm.get(tid), body)
+            self.assertEqual(db.session(tid)["status"], "needs_human", body)
 
 
 class TestPortalErrors(unittest.TestCase):
