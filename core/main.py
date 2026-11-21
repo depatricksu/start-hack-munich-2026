@@ -48,17 +48,30 @@ def shipment(f):
     pieces_kg = sum((p.get("count") or 1) * (p.get("kg_each") or 0) for p in pieces)
     pieces_cbm = sum((p.get("count") or 1) * (p.get("l_cm") or 0) * (p.get("w_cm") or 0) * (p.get("h_cm") or 0)
                      for p in pieces) / 1e6
-    weight = _total(float(f.get("weight_kg") or 0), pieces_kg)
-    volume = _total(float(f.get("volume_cbm") or 0), pieces_cbm)
+    group_kg = [(p.get("count") or 1) * (p.get("kg_each") or 0) for p in pieces]
+    group_cbm = [(p.get("count") or 1) * (p.get("l_cm") or 0) * (p.get("w_cm") or 0) * (p.get("h_cm") or 0) / 1e6
+                 for p in pieces]
+    weight = _total(float(f.get("weight_kg") or 0), pieces_kg, group_kg)
+    volume = _total(float(f.get("volume_cbm") or 0), pieces_cbm, group_cbm)
     return float(weight or 0), float(volume or 0)
 
 
-def _total(stated, from_pieces):
+def _is_one_group(stated, groups):
+    """The stated total is exactly ONE of several piece groups: the model copied lot 1 into weight_kg AND listed it
+    as the first piece. Live round 62 (21 Nov, CGN-SCL): lots 465 + 3x160 + 3x59 kg = 1,122 kg, weight_kg 465 and
+    the 465 kg lot again in pieces -> priced 1,587 kg, accuracy 37.5 of 45. Within 1 %: a real extra lot that
+    weighs the same as a listed one to the kilo is far rarer than this copy."""
+    return len([g for g in groups if g]) >= 2 and any(g and abs(stated - g) <= 0.01 * stated for g in groups)
+
+
+def _total(stated, from_pieces, groups=()):
     """The model often gives the SAME total twice: 'weight_kg': 676 and pieces 12 x 56.33 kg (= 676). That is one
     shipment, not two lots: adding them doubled the weight (real requests 268, 1631, 5246 -> priced as 1,352 kg,
     rejected too high). Equal within 2 % -> one total. Different -> separate lots, add them (round 9). (Riky)"""
     if stated and from_pieces and abs(stated - from_pieces) <= 0.15 * max(stated, from_pieces):   # rounded piece weights (500 vs 4x120) are one total; real separate lots differ far more (round 9: 67 %)
         return stated
+    if stated and from_pieces and _is_one_group(stated, groups):
+        return from_pieces
     return stated + from_pieces
 
 

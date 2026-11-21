@@ -29,6 +29,17 @@ class TestShipmentWeight(unittest.TestCase):
         self.assertEqual(w, 1952.0)                              # 730 + 192 + 1030, NOT 730
         self.assertAlmostEqual(v, 1.68 + 2.5168 + 0.48, 3)
 
+    def test_round_62_lot_1_copied_into_total_is_counted_once(self):
+        # the model put lot 1 into weight_kg/volume_cbm AND as the first piece group (with dims it made up)
+        f = {"weight_kg": 465, "volume_cbm": 3.87,
+             "pieces": [{"count": 1, "l_cm": 60, "w_cm": 40, "h_cm": 30, "kg_each": 465},
+                        {"count": 3, "l_cm": 100, "w_cm": 60, "h_cm": 46, "kg_each": 160},
+                        {"count": 3, "l_cm": 110, "w_cm": 110, "h_cm": 128, "kg_each": 59}]}
+        w, v = main.shipment(f)
+        self.assertEqual(w, 1122.0)                              # 465 + 480 + 177, NOT 1587
+        self.assertAlmostEqual(v, 9.4164, 3)                     # unchanged: 5U's best matched this volume
+        self.assertAlmostEqual(max(w, v * 167), 1572.5, 0)       # chargeable from volume, as the scorer priced it
+
     def test_all_in_pieces_no_total(self):
         f = {"weight_kg": None, "pieces": [{"count": 2, "kg_each": 100}, {"count": 1, "kg_each": 50}]}
         self.assertEqual(main.shipment(f)[0], 250.0)
