@@ -22,7 +22,15 @@ class TestCommodityDG(unittest.TestCase):
             self.assertIsNone(quote.read_declaration(t), t)
 
     def test_explicit_non_dangerous_blocks_inference(self):
-        self.assertIsNone(quote.read_declaration("spray cans, these are non-dangerous goods"))
+        """Soft words still yield to a 'non-dangerous' claim..."""
+        self.assertIsNone(quote.read_declaration("perfume samples, these are non-dangerous goods"))
+
+    def test_inherent_dg_ignores_the_non_dangerous_claim(self):
+        """...but aerosols / lithium do not: request 2533 said 'general cargo, non-dangerous' for spray cans and the
+        customer declined because we did not ask for the DG documents (Riky)."""
+        info = quote.read_declaration("Commodity: maintenance spray cans, 4 pieces. The goods are general cargo, non-dangerous")
+        self.assertEqual(info["un"], "UN1950")
+        self.assertEqual(quote.read_declaration("lithium-ion batteries, non-dangerous")["class"], "9")
 
     def test_apply_adds_dg_paragraph(self):
         os.environ["DG_MODE"] = "docs"
@@ -32,6 +40,22 @@ class TestCommodityDG(unittest.TestCase):
         self.assertIsNone(human)                       # docs mode: still quote, just ask for the papers
         self.assertIn("dangerous goods documents", body)
         self.assertNotIn("shipping documents declare", body)   # accurate opener for inferred DG
+
+
+class TestNoFalseDG(unittest.TestCase):
+    """Kai's false positives on b4f7c3a: each would ask for DG papers on general cargo and cost the round."""
+    def test_kai_cases_are_not_dg(self):
+        for t in ("Commodity: no lithium batteries inside, just cables.",
+                  "fragrance-free soap, 200 cartons",
+                  "office chairs, 12 pieces\n\nKind regards\nTom Weber\nFireworks Media GmbH",
+                  "perfume bottles (empty glass), 40 cartons",
+                  "spare parts without lithium batteries"):
+            self.assertIsNone(quote.read_declaration(t), t)
+
+    def test_still_ok(self):
+        for t in ("lithium-free grease", "non-flammable paint", "not dangerous goods"):
+            self.assertIsNone(quote.read_declaration(t), t)
+        self.assertEqual(quote.read_declaration("12 cartons of power banks")["class"], "9")
 
 
 if __name__ == "__main__":

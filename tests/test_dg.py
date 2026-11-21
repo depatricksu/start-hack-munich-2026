@@ -26,7 +26,7 @@ class ReadDeclaration(unittest.TestCase):
         self.assertIsNone(dg.read_declaration(""))
 
     def test_denials_in_a_mail(self):
-        for text in ("Spray cans, no dangerous goods.", "Industrial adhesives, non-DGR, general cargo",
+        for text in ("Paint brushes, no dangerous goods.", "Industrial adhesives, non-DGR, general cargo",
                      "kein Gefahrgut", "non-hazardous chemicals"):
             self.assertIsNone(dg.read_declaration(text), text)
         self.assertEqual(dg.read_declaration("Dangerous goods: Class 3 adhesives")["class"], "3")

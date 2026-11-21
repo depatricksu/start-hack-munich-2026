@@ -52,11 +52,51 @@ COMMODITY_UN = (
 )
 
 
+# DG by nature, whatever the customer claims. 5U's trap (request 2533, 21 Nov): "maintenance spray cans ... The goods
+# are general cargo, non-dangerous" -> customer declined: "these goods are dangerous goods and you quoted without asking
+# us for the dangerous goods documents". So for these the "non-dangerous" claim must NOT block the DG paragraph (Riky).
+INHERENT_DG = re.compile(r"\b(aerosols?|spray[\s-]?cans?|spray[\s-]?paint|lithium[\s-]?(?:ion|metal|batter(?:y|ies)|cells?)|"
+                         r"li[\s-]?ion\b|power[\s-]?banks?|dry[\s-]?ice|gas[\s-]?cylinders?|compressed[\s-]?gas|"
+                         r"fireworks?)\b", re.I)
+
+
+COMPANY = re.compile(r"\b(?:gmbh|ltd|limited|inc|llc|corp|s\.r\.l|b\.v|media|group|holding)\b|\bag$|& co\b", re.I)   # not 'kg', not 'AG' mid-text
+NEGATED = re.compile(r"\b(?:no|not|without|zero|non|free of|excluding|except)\b(?:\W+\w+){0,2}\W*$", re.I)
+FREE_AFTER = re.compile(r"^\s*-?\s*free\b|^[^.\n]{0,25}\b(?:empty|unfilled|dummy|replica|toy)\b", re.I)
+
+
+def _cargo_text(text):
+    """The mail without its signature block and company lines ('Fireworks Media GmbH' is not cargo)."""
+    lines = (text or "").splitlines()
+    for i in range(len(lines) - 1, max(-1, len(lines) - 8), -1):        # cut from the closing line downwards
+        if re.fullmatch(r"\s*(?:best|kind|warm|many)?\s*(?:regards|greetings|wishes|thanks|thank you|cheers|"
+                        r"mit freundlichen grüßen|viele grüße|viele gruesse.*|beste grüße|cordiali saluti|saludos)[ ,.!/a-zA-Z]*",
+                        lines[i], re.I):
+            lines = lines[:i]
+            break
+    return "\n".join(l for l in lines if not COMPANY.search(l))
+
+
+def _first_real(rx, text):
+    """First match of rx that is not negated ('no lithium batteries'), not '-free' and not 'empty ... bottles'."""
+    for m in rx.finditer(text):
+        before, after = text[max(0, m.start() - 40):m.start()], text[m.end():m.end() + 30]
+        if NEGATED.search(before) or FREE_AFTER.search(after):
+            continue
+        return m
+    return None
+
+
 def infer_commodity_dg(text):
-    """A DG dict inferred from a commodity name (no UN number declared), or None. Never fires if NOT_DG is present."""
-    if not text or NOT_DG.search(text):
+    """A DG dict inferred from a commodity name (no UN number declared), or None.
+    Only the cargo text counts (no signature, no company lines). A negated or '-free' or 'empty' mention is not DG
+    (Kai's false positives). Inherently dangerous goods (aerosols, lithium batteries, dry ice, gas cylinders,
+    fireworks) count even when the mail CLAIMS "non-dangerous" (5U's trap, request 2533); the softer words
+    (perfume, flammable...) still yield to that claim."""
+    if not text:
         return None
-    m = COMMODITY_DG.search(text)
+    cargo = _cargo_text(text)
+    m = _first_real(INHERENT_DG, cargo) or (None if NOT_DG.search(cargo) else _first_real(COMMODITY_DG, cargo))
     if not m:
         return None
     hit = m.group(0).lower().replace("-", " ")

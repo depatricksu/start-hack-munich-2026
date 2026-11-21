@@ -59,7 +59,7 @@ class TestExtract(unittest.TestCase):
             os.environ.pop("DG_MODE", None)
 
     def test_a_denial_is_not_dangerous_goods_for_the_regex_reader(self):
-        r = extract_rfq("RFQ", "FRA-ORD 200 kg 1 cbm spray cans, no dangerous goods, cheapest", **ENV)
+        r = extract_rfq("RFQ", "FRA-ORD 200 kg 1 cbm paint brushes, no dangerous goods, cheapest", **ENV)   # spray cans are DG by nature (5U trap, request 2533)
         self.assertNotIn("dangerous_goods", [f for f, _ in levels(validate(r))])
 
     def test_odd_density_flags_units(self):
@@ -114,7 +114,7 @@ class TestGate(unittest.TestCase):
         self.assertEqual(f["dg"]["un"], "UN1133")
 
     def test_a_denial_is_not_dangerous_goods(self):
-        for text in ("general cargo, non-dangerous", "spray cans, no dangerous goods", "kein Gefahrgut"):
+        for text in ("general cargo, non-dangerous", "paint brushes, no dangerous goods", "kein Gefahrgut"):   # spray cans = DG by nature (2533)
             f = dict(self.OK, dangerous_goods=True)            # the model flagged the word
             ok, note = gate(f, dict(self.MAIL, body=self.MAIL["body"] + " " + text))
             self.assertTrue(ok, text)
