@@ -67,10 +67,13 @@ def poll(since_id):
     return mails, nxt if nxt is not None else max([m["id"] for m in mails] + [since_id])
 
 
-def send(to, subject, body, in_reply_to=None, thread_id=None):
-    """Send a mail. With DRY_RUN=1 it is only logged. Returns True if sent (or dry run)."""
+def send(to, subject, body, in_reply_to=None, thread_id=None, event="mail_out"):
+    """Send a mail. With DRY_RUN=1 it is only logged. Returns True if sent (or dry run).
+
+    event: name of the log entry. Customer mails are "mail_out"; bid requests to carriers use "bid_mail_out",
+    so "mails we sent the customer" stays easy to count."""
     if config.DRY_RUN:
-        db.event("mail_out_dry_run", thread_id, in_reply_to, to=to, subject=subject, body=body)
+        db.event(event + "_dry_run", thread_id, in_reply_to, to=to, subject=subject, body=body)
         return True
     payload = {"to": to, "subject": subject, "body": body}
     if in_reply_to:
@@ -82,6 +85,6 @@ def send(to, subject, body, in_reply_to=None, thread_id=None):
             continue
         break
     ok = status in (200, 201)
-    db.event("mail_out" if ok else "mail_out_failed", thread_id, in_reply_to, to=to, subject=subject, body=body,
+    db.event(event if ok else event + "_failed", thread_id, in_reply_to, to=to, subject=subject, body=body,
              status=status, response=data)
     return ok

@@ -35,6 +35,13 @@ POLL_S = float(os.environ.get("POLL_S", "1.5"))
 # 90 is a START VALUE, NOT SETTLED. Calibrate with real data: `python -m core.stats` shows how fast bids
 # really come back. Time score: full under 120 s, zero at 360 s.
 BID_WAIT_S = float(os.environ.get("BID_WAIT_S", "90"))
+# If a leg we cannot quote without (trucker for door pickup, or the only flight price) has not answered at
+# BID_WAIT_S, keep waiting until this many seconds after RFQ arrival. A late correct quote beats none.
+# Also a start value: an RFQ expires at 360 s.
+BID_MAX_WAIT_S = float(os.environ.get("BID_MAX_WAIT_S", "300"))
+# 1 = on normal requests also ask up to 3 airlines by mail, without waiting, to learn if bids beat sheet/portal.
+# Turn off (0) once we know. See `python -m core.stats`.
+BID_EXPERIMENT = os.environ.get("BID_EXPERIMENT", "1") == "1"
 # An RFQ older than this is dead (expires after 6 min). We do not answer it, e.g. after a restart.
 RFQ_MAX_AGE_S = float(os.environ.get("RFQ_MAX_AGE_S", "330"))
 CLARIFY = os.environ.get("CLARIFY", "1") == "1"     # ask the customer when only data is missing (Erik, 21 Nov)

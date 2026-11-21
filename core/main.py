@@ -19,10 +19,7 @@ from shared.rfq import gate as rfq_gate
 from pricing import multi, tariff_mail
 from llm import clarify
 
-try:                       # sourcing/bids.py does not exist yet. See CLAUDE.md "How to plug in".
-    from sourcing import bids
-except ImportError:
-    bids = None
+from sourcing import bids                               # truckers, rare lanes, rate desk: prices by mail (Kai)
 from booking import tracking
 from booking import handlers as booking                 # task 04: accept -> book -> keep the customer informed
 
@@ -88,12 +85,12 @@ def price_and_quote(tid, mail, fields, asked=False):
     db.update_session(tid, options=options)
     db.event("options", tid, mail["id"], count=len(options), options=options)
 
-    pending = bids.request(db.session(tid), fields) if bids else 0   # mails to carriers/truckers
+    pending = bids.request(db.session(tid), fields)          # mails to carriers/truckers
     if pending:
         db.update_session(tid, status="waiting_bids")
         return db.event("waiting_bids", tid, mail["id"], pending=pending, wait_s=config.BID_WAIT_S)
-    if postcode:
-        return needs_human(tid, mail, "door pickup needs a trucker bid, sourcing/bids.py is not built yet")
+    if postcode:                                             # door pickup but nobody to ask
+        return needs_human(tid, mail, "door_pickup: no trucker serves postcode zone %s" % postcode[:2])
     finalize(tid)
 
 
@@ -101,8 +98,7 @@ def finalize(tid):
     """Pick the best option and send the one quote. Called right away, or when the bid wait is over."""
     s = db.session(tid)
     fields, options = json.loads(s["fields"]), json.loads(s["options"] or "[]")
-    if bids and hasattr(bids, "final_options"):
-        options = bids.final_options(tid, options)           # add bids, add trucker leg
+    options = bids.final_options(tid, options)               # add bids, add trucker leg
     if not options:
         return needs_human(tid, None, "no price found for this lane")
     if fields.get("prefer") == "fastest":
@@ -130,10 +126,7 @@ def needs_human(tid, mail, why):
 
 
 def handle_carrier_bid(mail):
-    if bids:
-        bids.on_reply(mail)                                  # must save the bid with replied_at
-    else:
-        db.event("no_handler_yet", mail["thread_id"], mail["id"], route="carrier_bid")
+    bids.on_reply(mail)                                      # reads the answer and saves it; tick() quotes
 
 
 # route -> function(mail). Routes without a handler are saved and logged, nothing more.
@@ -141,6 +134,7 @@ def handle_carrier_bid(mail):
 HANDLERS = {
     "rfq": handle_rfq,
     "carrier_bid": handle_carrier_bid,
+    "ratedesk": handle_carrier_bid,                      # the rate desk answers like a carrier (sourcing/bids.py)
     "follow_up": booking.handle_follow_up,
     "booking_confirmation": booking.handle_booking_confirmation,
     "tracking": tracking.handle,                         # task 05 (Patrick): answer from our bookings table
@@ -166,14 +160,22 @@ def process(mail):
 
 
 def tick():
-    """Quote the sessions that waited long enough for bids (or have all bids in)."""
+    """Quote the sessions that waited long enough for bids (or have all needed bids in)."""
     for s in db.waiting_sessions():
-        rows = db.bids_for(s["thread_id"])
-        all_in = rows and all(b["replied_at"] for b in rows)
-        if all_in or time.time() >= s["deadline"]:
-            db.event("bid_wait_over", s["thread_id"], all_in=bool(all_in), bids=len(rows),
-                     answered=sum(1 for b in rows if b["replied_at"]))
-            finalize(s["thread_id"])
+        tid, now = s["thread_id"], time.time()
+        rows = [b for b in bids.rows(tid) if b["required"]]
+        all_in = all(b["replied_at"] for b in rows)
+        if not all_in and now < s["deadline"]:
+            continue
+        if not all_in and bids.must_wait(tid) and now < s["received_at"] + config.BID_MAX_WAIT_S:
+            continue                                         # a needed leg is missing: late quote beats no quote
+        db.event("bid_wait_over", tid, all_in=bool(all_in), bids=len(rows),
+                 answered=sum(1 for b in rows if b["replied_at"]), waited_s=round(now - s["received_at"], 1))
+        try:
+            finalize(tid)
+        except Exception as e:                               # never loop forever on one broken session
+            db.event("error", tid, error=str(e), trace=traceback.format_exc()[-1500:])
+            db.update_session(tid, status="needs_human", note="error: %s" % e)
 
 
 def run():

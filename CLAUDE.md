@@ -83,15 +83,16 @@ Erik: run `DRY_RUN=1 LLM_FAKE=0 python -m core.main` once before 16:00 and fix w
 ## How to plug in (do not edit `core/` for this, except one line in `HANDLERS`)
 - **New route** (follow-up/booking, tracking, tariff, ratedesk): write `def handle(mail)` in your folder, then add
   `"tracking": yourmodule.handle` to `HANDLERS` in `core/main.py`. Send only with `mailbox.send(...)`. Log with `db.event(...)`.
-- **Bids** (`sourcing/bids.py`, not built yet). The loop already calls it when the file exists:
-  - `request(session, fields) -> int`: mail the carriers/truckers, insert one `bids` row each (`requested_at`), return how many.
-  - `on_reply(mail)`: parse the bid, fill `replied_at`, `total`, `currency`, `transit_days` on that row.
-  - `final_options(thread_id, options) -> options`: add the bids (and the trucker leg) to the price options.
-  The loop quotes when all bids are in or the wait is over, whichever is first.
+- **Bids** (`sourcing/bids.py`, Kai). Prices by mail: truckers for door pickup, airlines + rate desk for lanes with no
+  sheet/portal price. Each answer is read by one tiny gateway call into a form; code does the math.
+  `request()` asks, `on_reply()` reads, `must_wait()` + `final_options()` feed the quote. Bid mails are logged as
+  `bid_mail_out`, not `mail_out`. Events: `bid_requested`, `bid_received`, `bid_wait_over`, `no_trucker_bid`.
+  `BID_EXPERIMENT=1` (default) also asks up to 3 airlines on normal requests WITHOUT waiting, only to learn if bids
+  beat sheet/portal. `python3 -m core.stats` shows the result. Turn it off with `BID_EXPERIMENT=0` once we know.
 - An option is a dict with `airline, total, currency, total_eur, transit_days, source` (+ `rate_id` from the portal).
 
 ## Bid wait: 90 s is a start value, not settled
-`BID_WAIT_S` (default 90, counted from RFQ arrival) is a guess. Do not treat it as decided and do not hard-code it anywhere.
+`BID_WAIT_S` (default 90, counted from RFQ arrival) and `BID_MAX_WAIT_S` (300, when a needed leg is still missing) are guesses. Do not treat it as decided and do not hard-code it anywhere.
 After the first real mails, run `python -m core.stats`, look at how fast bids really come back, and set it with the
 env var. Time score: full under 120 s, zero at 360 s. Change it in `.env` on Erik's MacBook, then tell the team.
 
