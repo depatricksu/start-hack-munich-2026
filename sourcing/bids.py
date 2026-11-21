@@ -267,7 +267,8 @@ def bid_hours(b):
 
 
 def pick_bid(bids_, prefer):
-    """Which bid is the right one. Answer from the 5U booth (21 Nov):
+    """Which bid is the right one. Default BID_PICK=balanced: the board shows 5U's scorer always takes the balanced
+    bid (see core/config.py). BID_PICK=auto uses the booth's answer (21 Nov) instead:
       customer asks for fast            -> the fastest bid (price breaks a tie)
       customer asks for cheapest        -> the cheapest bid
       customer states no preference     -> BALANCED: price and speed count 50/50, not simply the cheapest

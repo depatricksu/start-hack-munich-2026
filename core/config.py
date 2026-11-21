@@ -43,10 +43,12 @@ BID_MAX_WAIT_S = float(os.environ.get("BID_MAX_WAIT_S", "300"))
 # Turn off (0) once we know. See `python -m core.stats`.
 BID_EXPERIMENT = os.environ.get("BID_EXPERIMENT", "1") == "1"
 QUOTE_EUR = os.environ.get("QUOTE_EUR", "1") == "1"        # quote in EUR even if the cheapest flight came in USD
-# Which bid we take among truckers / airline bids. auto = the 5U booth rule (see sourcing/bids.py pick_bid):
-# customer says fast -> fastest, says cheapest -> cheapest, says nothing -> balanced 50/50 price and speed.
-# Override with cheapest | balanced | fastest if the board shows the rule is different.
-BID_PICK = os.environ.get("BID_PICK", "auto").lower()
+# Which bid we take among truckers / airline bids (sourcing/bids.py pick_bid).
+# balanced (default) = price and speed 50/50. Board evidence 21 Nov (rounds 1, 2, 4 fit to the cent): 5U's scorer
+# ALWAYS uses the balanced trucker, also for customers who ask for the cheapest, and a quote BELOW its best price
+# loses points too (more than about 5% below is rejected as too_low). So the cheapest trucker is not the safe side.
+# Other values: auto (booth rule: fast -> fastest, cheapest -> cheapest, nothing said -> balanced) | cheapest | fastest.
+BID_PICK = os.environ.get("BID_PICK", "balanced").lower()
 # The supervisor uploads a snapshot of the live DB for the team this often (core/share.py). 0 = never.
 SHARE_EVERY_S = float(os.environ.get("SHARE_EVERY_S", "900"))
 # An RFQ older than this is dead (expires after 6 min). We do not answer it, e.g. after a restart.
