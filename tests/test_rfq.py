@@ -44,10 +44,23 @@ class TestExtract(unittest.TestCase):
         self.assertIn(("mode", Level.WARNING), levels(validate(r)))
         self.assertTrue(can_price(validate(r)))
 
-    def test_dangerous_goods_to_human(self):
+    def test_dangerous_goods_is_quoted_with_dg_paragraph(self):
         r = extract_rfq("RFQ", "FRA-ORD 200 kg 1 cbm lithium batteries UN3480, cheapest", **ENV)
-        self.assertIn(("dangerous_goods", Level.HUMAN), levels(validate(r)))
-        self.assertFalse(can_price(validate(r)))
+        self.assertIn(("dangerous_goods", Level.WARNING), levels(validate(r)))
+        self.assertTrue(can_price(validate(r)))
+
+    def test_dangerous_goods_to_human_when_dg_mode_human(self):
+        import os
+        os.environ["DG_MODE"] = "human"
+        try:
+            r = extract_rfq("RFQ", "FRA-ORD 200 kg 1 cbm lithium batteries UN3480, cheapest", **ENV)
+            self.assertIn(("dangerous_goods", Level.HUMAN), levels(validate(r)))
+        finally:
+            os.environ.pop("DG_MODE", None)
+
+    def test_a_denial_is_not_dangerous_goods(self):
+        r = extract_rfq("RFQ", "FRA-ORD 200 kg 1 cbm spray cans, no dangerous goods, cheapest", **ENV)
+        self.assertNotIn("dangerous_goods", [f for f, _ in levels(validate(r))])
 
     def test_odd_density_flags_units(self):
         r = extract_rfq("RFQ", "DUS to BOM 100 kg 120 cbm cheapest", **ENV)
@@ -87,9 +100,9 @@ class TestGate(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("missing: weight_kg", note)
 
-    def test_dangerous_goods_stops(self):
+    def test_dangerous_goods_warns_and_quotes(self):
         ok, note = gate(dict(self.OK, dangerous_goods=True), self.MAIL)
-        self.assertFalse(ok)
+        self.assertTrue(ok)
         self.assertIn("dangerous_goods", note)
 
     def test_mismatch_only_warns(self):

@@ -219,7 +219,8 @@ def extract_rfq(subject: str, body: str, **envelope) -> RFQ:
         r.service = Service.DOOR_TO_PORT
         r.pickup_postcode = m.group(1)
 
-    if re.search(r"\b(dangerous goods|dgr|hazmat|un ?\d{4}|lithium|gefahrgut)\b", low):
+    import dg                                            # a denial ("no dangerous goods") is not DG (Riky)
+    if dg.read_declaration(text):
         r.dangerous_goods = True
 
     m = re.search(r"\b(USD|EUR|GBP|CHF)\b", text)
@@ -308,8 +309,12 @@ def validate(r: RFQ) -> list[Issue]:
                 f"pickup zone {r.pickup_zone} maps to {PICKUP_ZONES[r.pickup_zone]}, customer said {r.origin}")
 
     # scope
-    if r.dangerous_goods:
-        add("dangerous_goods", Level.HUMAN, "dangerous goods mentioned -> hand to a human")
+    if r.dangerous_goods:                                # since 17:00 5U sends DG RFQs: dg.apply quotes them (Riky)
+        import os
+        if os.environ.get("DG_MODE", "docs").strip().lower() == "human":
+            add("dangerous_goods", Level.HUMAN, "dangerous goods mentioned -> hand to a human")
+        else:
+            add("dangerous_goods", Level.WARNING, "dangerous goods -> quoted with the DG documents paragraph")
     if r.currency_requested and r.currency_requested != QUOTE_CURRENCY:
         add("currency_requested", Level.WARNING,
             f"customer asked for {r.currency_requested}, tariffs are {QUOTE_CURRENCY}")
