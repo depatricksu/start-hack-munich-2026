@@ -24,8 +24,39 @@ STATUS_TEXT = {
 }
 
 
+BK_RE = re.compile(r"\bBK-[A-Za-z0-9]{6,12}\b")
+
+
+def _from_sessions():
+    """Booked/confirmed shipments the CRM bookings table is missing (e.g. booked by a human via the take-over queue).
+    So tracking never says 'no match' for a shipment we actually booked. Reads the same DB."""
+    import json as _json
+    out = []
+    try:
+        rows = crm.con().execute(
+            "SELECT thread_id, customer, status, fields, chosen, reply, note FROM sessions "
+            "WHERE status IN ('booked','confirmed')").fetchall()
+    except Exception:
+        return out
+    for r in rows:
+        f = _json.loads(r["fields"]) if r["fields"] else {}
+        ch = _json.loads(r["chosen"]) if r["chosen"] else {}
+        text = "%s %s" % (r["note"] or "", r["reply"] or "")
+        m = BK_RE.search(text) or BK_RE.search(_json.dumps(ch))
+        out.append({"thread_id": r["thread_id"], "customer": r["customer"], "status": r["status"],
+                    "origin": (f.get("origin") or ch.get("origin")), "destination": (f.get("destination") or ch.get("destination")),
+                    "weight_kg": f.get("weight_kg_total") or f.get("weight_kg"), "volume_cbm": f.get("volume_cbm_total") or f.get("volume_cbm"),
+                    "airline": ch.get("airline"), "transit_days": ch.get("transit_days"),
+                    "booking_reference": (m.group(0) if m else None), "team_reference": "GOOGLE-%s" % r["thread_id"],
+                    "booked_at": None, "confirmed_at": None, "created_at": 0})
+    return out
+
+
 def _all():
-    return [dict(r) for r in crm.con().execute("SELECT * FROM bookings ORDER BY created_at DESC")]
+    rows = [dict(r) for r in crm.con().execute("SELECT * FROM bookings ORDER BY created_at DESC")]
+    have = {r.get("thread_id") for r in rows}
+    rows += [b for b in _from_sessions() if b["thread_id"] not in have]   # booked sessions the CRM is missing
+    return rows
 
 
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
