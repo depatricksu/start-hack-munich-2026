@@ -21,9 +21,12 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
       <body className="h-full flex flex-col">
-        <header className="flex items-center gap-8 border-b border-zinc-200 bg-white px-6 h-14 shrink-0">
-          <div className="flex items-center gap-2 font-semibold tracking-tight">
-            <span className="inline-block h-2.5 w-2.5 rounded-full bg-emerald-500" />
+        <header className="flex items-center gap-6 border-b border-line bg-surface px-6 h-14 shrink-0">
+          <div className="flex items-center gap-2.5 font-semibold tracking-tight">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="live-dot absolute inline-flex h-full w-full rounded-full bg-emerald-500" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+            </span>
             Forwarder Control Room
           </div>
           <nav className="flex gap-1 text-sm">
@@ -33,6 +36,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
               </Link>
             ))}
           </nav>
+          <span className="ml-auto num text-xs text-zinc-400">autonomous air forwarder · 5U</span>
         </header>
         <main className="flex-1 min-h-0">{children}</main>
       </body>
