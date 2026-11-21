@@ -418,5 +418,24 @@ class TestRound9(unittest.TestCase):
         self.assertIn("BK-CUST0001", db.session(tid)["note"])
 
 
+class TestMultiShipmentFilters(unittest.TestCase):
+    """Red-team round 10: a mail with several shipments skipped the excluded-airline filter (and the others)."""
+    def test_excluded_airline_never_quoted_in_a_multi_mail(self):
+        from core import db, mailbox
+        from pricing import multi
+        tid = 9870000
+        body = ("Two separate shipments, cheapest each: 1) FRA to ORD 300 kg 1.5 cbm 2) MUC to SIN 220 kg 1.1 cbm. "
+                "Please do not offer Yellowtail Air Freight for any of these.")
+        m = mailbox.normalize({"id": tid, "from": "r.klein@klein-group.mail", "subject": "Two quotes please", "body": body})
+        db.save_mail(m); db.new_session(m)
+        db.update_session(tid, customer="r.klein@klein-group.mail")
+        fields = {"prefer": "cheapest", "shipments": [
+            {"origin": "FRA", "destination": "ORD", "weight_kg": 300, "volume_cbm": 1.5, "pieces": [], "prefer": "cheapest"},
+            {"origin": "MUC", "destination": "SIN", "weight_kg": 220, "volume_cbm": 1.1, "pieces": [], "prefer": "cheapest"}]}
+        parts, problem = multi.price_all(tid, m, fields)
+        self.assertIsNone(problem)
+        self.assertNotIn("Yellowtail Air Freight", [p["best"]["airline"] for p in parts])
+
+
 if __name__ == "__main__":
     unittest.main()

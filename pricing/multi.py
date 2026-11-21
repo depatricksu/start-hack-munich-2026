@@ -63,7 +63,14 @@ def price_all(tid, mail, fields):
         opts = _options(o, d, s["weight_kg_total"], s["volume_cbm_total"], tid, mail["id"])
         if not opts:
             return parts, f"multi_shipment #{n}: no price found for {o}-{d}"
-        if (s.get("prefer") or "").lower() == "fastest":
+        from core import main as clerk                       # the same filters as a single quote (red-team round 10)
+        opts = clerk.drop_excluded(tid, opts)                # "do not offer Zephyr": never quoted, also in a multi mail
+        opts = clerk.keep_required(tid, opts) if opts else opts
+        if not opts:
+            return parts, f"multi_shipment #{n}: no allowed airline for {o}-{d} (customer excluded / required one)"
+        opts = clerk.drop_price_outliers(tid, opts)
+        opts, too_late = clerk.by_deadline(tid, opts, fields)
+        if too_late or (s.get("prefer") or "").lower() == "fastest":
             best = min(opts, key=lambda x: (x["transit_days"], Decimal(x["total_eur"])))
         else:
             best = min(opts, key=lambda x: Decimal(x["total_eur"]))
