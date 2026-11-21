@@ -25,7 +25,8 @@ from datetime import datetime, timedelta, timezone
 from core import config
 
 STYLES = ("control", "city", "destination", "moment", "local", "mirror")
-STATE = os.path.join(config.ROOT, "data", "human_learn.json")
+# v2: the first file also collected fake quotes from the test suite (core.restart runs it on the runner)
+STATE = os.path.join(config.ROOT, "data", "human_learn_v2.json")
 TEAM = os.environ.get("TEAM_NAME", "Google")
 LEARN_WINDOW_S = float(os.environ.get("HUMAN_LEARN_WINDOW_S", "1800"))   # the jury may judge a round late
 POLL_S = float(os.environ.get("HUMAN_POLL_S", "60"))
@@ -440,7 +441,7 @@ def available(fields, lang, received_at=None):
 
 def choose(fields, lang, thread_id=0, received_at=None, rng=None):
     """Thompson sampling over the styles that fit this mail."""
-    if not config.DRY_RUN:
+    if _learning_on():
         _ensure_watcher()                                 # baseline of our human count before the first quote
     if HUMAN_STYLE in STYLES:
         return HUMAN_STYLE
@@ -454,9 +455,14 @@ def choose(fields, lang, thread_id=0, received_at=None, rng=None):
     return max(draws, key=draws.get)
 
 
+def _learning_on():
+    """Only the live clerk learns: never in DRY_RUN, never inside the test suite (tests patch DRY_RUN off)."""
+    return not config.DRY_RUN and os.environ.get("HUMAN_LEARN", "1") == "1"
+
+
 def record(thread_id, style, now=None):
     """The runner sent a quote in this style: it waits for the jury."""
-    if config.DRY_RUN:
+    if not _learning_on():
         return
     with _lock:
         s = _load()

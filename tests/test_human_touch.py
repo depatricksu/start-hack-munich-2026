@@ -51,7 +51,8 @@ class TestTouch(unittest.TestCase):
         self.assertIn("Saturday evening", human.moment_line(sat_evening, "en"))
 
     def test_learning_credits_rise_and_times_out(self):
-        with mock.patch.object(human.config, "DRY_RUN", False), mock.patch.object(human, "_ensure_watcher"):
+        with mock.patch.object(human.config, "DRY_RUN", False), mock.patch.object(human, "_ensure_watcher"), \
+                mock.patch.dict(os.environ, {"HUMAN_LEARN": "1"}):
             human.learn(0, now=1000)
             human.record(1, "city", now=1000)
             human.record(2, "moment", now=1000)
