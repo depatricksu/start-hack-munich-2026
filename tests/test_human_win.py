@@ -254,6 +254,7 @@ class Gate(Base):
         self.assertIsNotNone(quality.DENY.search("livraison dans le délai prévu"))
 
     def test_their_own_delivery_can_be_said_back_but_not_invented(self):
+        p = mock.patch.object(human, "HUMAN_STYLE", "control"); p.start(); self.addCleanup(p.stop)   # pin the greeting: choose() samples randomly otherwise
         mail = ("Sehr geehrte Damen und Herren,\n\nbitte Angebot für 412 kg von Stuttgart nach Singapur. Die Ware steht ab dem "
                 "02.12.2026 bereit, wir liefern selbst am Flughafen an.\n\nKatharina Brandt")
         f = fields_for(mail, "brandt-praezision@hackloop.mail", "de", origin="STR", destination="SIN")
