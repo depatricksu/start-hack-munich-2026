@@ -1,0 +1,14 @@
+{
+  "_doc": "Calendar of our forwarder (the human who talks price with customers). Edit busy slots here, or set FORWARDER_ICS to an .ics file to read busy times from a real calendar export.",
+  "name": "Patrick",
+  "timezone": "Europe/Berlin",
+  "working_days": [0, 1, 2, 3, 4],
+  "working_hours": ["09:00", "18:00"],
+  "slot_minutes": 30,
+  "min_notice_hours": 2,
+  "busy": [
+    {"start": "2026-11-23T09:00", "end": "2026-11-23T10:30", "what": "team call"},
+    {"start": "2026-11-23T12:00", "end": "2026-11-23T13:00", "what": "lunch"},
+    {"start": "2026-11-24T12:00", "end": "2026-11-24T13:00", "what": "lunch"}
+  ]
+}

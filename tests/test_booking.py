@@ -1,27 +1,34 @@
-"""Task 04 end to end with fake mails, DRY_RUN, no network. Run: python -m unittest tests.test_booking -v"""
-import json, os, tempfile, unittest
+"""Task 04: every customer answer to a quote, with fake mails, no network.
+Run: python -m unittest tests.test_booking -v
+"""
+import datetime as dt, json, os, tempfile, unittest
+from unittest import mock
+from zoneinfo import ZoneInfo
 
 os.environ["DB_PATH"] = os.path.join(tempfile.mkdtemp(), "test.db")
 os.environ["DRY_RUN"], os.environ["LLM_FAKE"], os.environ["FIVEU_API_KEY"] = "1", "1", ""
 
-from core import db, main  # noqa: E402
-from booking import crm, handlers  # noqa: E402
+from core import config, db, main  # noqa: E402
+from booking import crm, handlers, meeting, replies  # noqa: E402
 
 CUSTOMER = "anna.schmidt@customer-example.mail"
+RFQ = "Hi, please quote 90 kg, 0.4 cbm from HAM to BOG. Cheapest please."
+BERLIN = ZoneInfo("Europe/Berlin")
 
 
 def mail(id, body, subject="Quote HAM to BOG", sender=CUSTOMER, refs=None):
-    return {"id": id, "from": sender, "subject": subject, "body": body, "references": refs or [],
-            "in_reply_to": refs[-1] if refs else None}
+    return main.mailbox.normalize({"id": id, "from": sender, "subject": subject, "body": body,
+                                   "references": refs or [], "in_reply_to": refs[-1] if refs else None})
 
 
 def sent(thread_id):
-    rows = db.con().execute("SELECT data FROM events WHERE kind='mail_out_dry_run' AND thread_id=?", (thread_id,))
+    rows = db.con().execute("SELECT data FROM events WHERE kind IN ('mail_out_dry_run','mail_out') AND thread_id=?",
+                            (thread_id,))
     return [json.loads(r["data"]) for r in rows]
 
 
-def quote(tid, portal=False):
-    main.process(main.mailbox.normalize(mail(tid, "Hi, please quote 90 kg, 0.4 cbm from HAM to BOG. Cheapest please.")))
+def quote(tid, portal=False, rfq=RFQ, sender=CUSTOMER):
+    main.process(mail(tid, rfq, sender=sender))
     if portal:   # pretend the portal won: chosen option carries a rate_id
         s = db.session(tid)
         chosen = dict(json.loads(s["chosen"]), source="portal", rate_id="R-test12345678", airline="Riverbend Cargo")
@@ -29,54 +36,218 @@ def quote(tid, portal=False):
     return db.session(tid)
 
 
+def answer(tid, n, body, sender=CUSTOMER):
+    main.process(mail(tid + n, body, "Re: Quote HAM to BOG", sender=sender, refs=[tid]))
+
+
 class TestClassify(unittest.TestCase):
     def test_words(self):
-        self.assertEqual(handlers.classify("Great, please book it."), "accept")
-        self.assertEqual(handlers.classify("Passt, bitte buchen."), "accept")
-        self.assertEqual(handlers.classify("No thanks, too expensive."), "decline")
-        self.assertEqual(handlers.classify("Could you do it faster?"), "unclear")
-        self.assertEqual(handlers.classify("Yes please book.\n\n> Our all-in price is ... could you?"), "accept")
+        c = handlers.classify
+        self.assertEqual(c("Great, please book it."), "accept")
+        self.assertEqual(c("Passt, bitte buchen."), "accept")
+        self.assertEqual(c("No thanks, too expensive."), "decline")
+        self.assertEqual(c("We went with another forwarder."), "decline")
+        self.assertEqual(c("Too expensive, can you do better?"), "better_price")
+        self.assertEqual(c("Geht es günstiger?"), "better_price")
+        self.assertEqual(c("Could you do it faster?"), "unclear")
+        self.assertEqual(c("Yes please book.\n\n> Our all-in price is ... could you?"), "accept")
 
 
-class TestFlow(unittest.TestCase):
-    def test_portal_accept_book_confirm(self):
-        tid = 1001
+class TestOutcomes(unittest.TestCase):
+    def test_accept_portal_then_confirmed(self):
+        tid = 1000
         self.assertEqual(quote(tid, portal=True)["status"], "quoted")
-        main.process(main.mailbox.normalize(mail(1002, "Yes, please book it.", "Re: Quote HAM to BOG", refs=[tid])))
+        answer(tid, 1, "Yes, please book it.")
         b = crm.get(tid)
-        self.assertEqual((b["status"], b["booking_reference"]), ("booked", "BK-DRYRUN01"))
+        self.assertEqual((b["status"], b["booking_reference"]), ("booked", "BK-DRYRUN00"))
         self.assertEqual(db.session(tid)["status"], "booked")
-        self.assertIn("BK-DRYRUN01", sent(tid)[-1]["body"])
-        main.process(main.mailbox.normalize(mail(1003, "Your booking is confirmed.", "Booking BK-DRYRUN01 confirmed",
-                                                 sender="riverbend-cargo@hackloop.mail")))
+        self.assertIn("BK-DRYRUN00", sent(tid)[-1]["body"])
+        main.process(mail(1100, "Your booking is confirmed.", "Booking BK-DRYRUN00 confirmed",
+                          sender="riverbend-cargo@hackloop.mail"))
         self.assertEqual(crm.get(tid)["status"], "confirmed")
         self.assertIn("confirmed", sent(tid)[-1]["body"])
 
-    def test_sheet_airline_books_by_mail(self):
-        tid = 2001
-        s = quote(tid)
-        self.assertEqual(json.loads(s["chosen"])["source"], "sheet")
-        main.process(main.mailbox.normalize(mail(2002, "Go ahead.", "Re: Quote HAM to BOG", refs=[tid])))
+    def test_accept_sheet_airline_books_by_mail(self):
+        tid = 2000
+        self.assertEqual(json.loads(quote(tid)["chosen"])["source"], "sheet")
+        answer(tid, 1, "Go ahead.")
         self.assertEqual(crm.get(tid)["status"], "requested")
         to = [m["to"] for m in sent(tid)]
         self.assertIn("cobalt-skylift@hackloop.mail", to)
         self.assertEqual(to[-1], CUSTOMER)
-        main.process(main.mailbox.normalize(mail(2003, "Booked for GOOGLE-2001.", "Booking BK-ABC12345 confirmed",
-                                                 sender="cobalt-skylift@hackloop.mail")))
+        main.process(mail(2100, "Booked for GOOGLE-2000.", "Booking BK-ABC12345 confirmed",
+                          sender="cobalt-skylift@hackloop.mail"))
         self.assertEqual((crm.get(tid)["status"], crm.get(tid)["booking_reference"]), ("confirmed", "BK-ABC12345"))
 
-    def test_unclear_goes_to_human(self):
-        tid = 3001
+    def test_decline_is_just_lost(self):
+        tid = 3000
         quote(tid)
-        main.process(main.mailbox.normalize(mail(3002, "Can you do it cheaper?", "Re: Quote HAM to BOG", refs=[tid])))
+        answer(tid, 1, "No thanks, we found another option.")
+        self.assertEqual(db.session(tid)["status"], "lost")
+        self.assertEqual(len(sent(tid)), 1)        # only the quote, no decline mail
+        self.assertIsNone(crm.get(tid))
+
+    def test_german_decline_is_lost(self):
+        tid = 3500
+        quote(tid)
+        answer(tid, 1, "Nein danke, wir haben einen anderen Anbieter.")
+        self.assertEqual(db.session(tid)["status"], "lost")
+        self.assertEqual(len(sent(tid)), 1)
+
+    def test_better_price_small_shipment_keeps_best_rate(self):
+        tid = 4000
+        quote(tid)                                            # cheapest already quoted, 470.70 EUR < 1500
+        answer(tid, 1, "Too expensive for us. Can you do a better price?")
+        s = db.session(tid)
+        self.assertEqual(s["status"], "quoted")               # offer stays open, a "book it" still books
+        self.assertIn("470.70 EUR", sent(tid)[-1]["body"])
+        answer(tid, 2, "Ok, please book it.")
+        self.assertEqual(crm.get(tid)["status"], "requested")
+
+    def test_better_price_offers_cheaper_option(self):
+        tid = 4100
+        quote(tid, rfq=RFQ.replace("Cheapest", "Fastest"))    # fastest quoted: Yellowtail 514.80
+        self.assertIn("Yellowtail", json.loads(db.session(tid)["chosen"])["airline"])
+        answer(tid, 1, "Hmm, is there something cheaper?")
+        body = sent(tid)[-1]["body"]
+        self.assertIn("Cobalt Skylift", body)
+        self.assertIn("470.70 EUR", body)
+        self.assertEqual(json.loads(db.session(tid)["chosen"])["airline"], "Cobalt Skylift")
+        answer(tid, 2, "Great, book it.")                     # books the cheaper one
+        self.assertEqual(crm.get(tid)["airline"], "Cobalt Skylift")
+
+    def test_better_price_big_shipment_offers_meeting_in_customer_time(self):
+        tid = 4200
+        quote(tid)
+        with mock.patch.object(handlers, "MEETING_MIN_EUR", handlers.Decimal("100")):
+            answer(tid, 1, "Too expensive for us. Can you do a better price? I'm in New York (EST).",
+                   sender="joe@buyer-example.us")
+        s = db.session(tid)
+        self.assertEqual(s["status"], "meeting_proposed")
+        body = sent(tid)[-1]["body"]
+        self.assertIn("EST", body)                 # times shown in the customer's zone
+        self.assertIn("CET", body)                 # and in ours
+        self.assertEqual(body.count("\n- "), 3)    # three slots offered
+        self.assertIsNone(crm.get(tid))            # nothing booked
+        answer(tid, 2, "Tuesday works, please confirm.")       # picking a time is not a booking
         self.assertEqual(db.session(tid)["status"], "needs_human")
         self.assertIsNone(crm.get(tid))
 
-    def test_decline(self):
-        tid = 4001
+    def test_unclear_goes_to_human(self):
+        tid = 5000
         quote(tid)
-        main.process(main.mailbox.normalize(mail(4002, "No thanks, we found another option.", "Re: x", refs=[tid])))
-        self.assertEqual(db.session(tid)["status"], "lost")
+        answer(tid, 1, "Can you ship it on Friday instead?")
+        self.assertEqual(db.session(tid)["status"], "needs_human")
+        self.assertEqual(len(sent(tid)), 1)        # only the quote, no guessing
+
+    def test_second_answer_after_booking_is_ignored(self):
+        tid = 5500
+        quote(tid, portal=True)
+        answer(tid, 1, "Please book.")
+        answer(tid, 2, "Please book.")
+        self.assertEqual(sum(1 for m in sent(tid) if "BK-DRYRUN" in m["body"]), 1)
+
+
+class TestPortalErrors(unittest.TestCase):
+    """Live booking path (DRY_RUN off) with a fake 5U API."""
+
+    def run_live(self, tid, responses):
+        calls = []
+
+        def api(method, path, body=None, params=None, timeout=20):
+            calls.append((method, path))
+            if path == "/v1/mailbox/messages":
+                return 201, {"id": 1}
+            return responses.pop(0)
+        quote(tid, portal=True)
+        with mock.patch.object(config, "DRY_RUN", False), mock.patch.object(handlers.mailbox, "api", api), \
+                mock.patch.object(main.mailbox, "api", api):
+            answer(tid, 1, "Please book it.")
+        return calls
+
+    def booked(self, ref, price="470.70"):
+        return 201, {"booking_reference": ref, "rate_id": "R-x", "price": price, "currency": "EUR",
+                     "airline": "Riverbend Cargo", "airline_code": "RB", "status": "booked", "team_reference": "t"}
+
+    def test_expired_rate_gets_fresh_rate(self):
+        tid = 6000
+        calls = self.run_live(tid, [(410, "expired"), (200, {"rate_id": "R-fresh1234567", "total": "471.00"}),
+                                    self.booked("BK-FRESH001")])
+        self.assertEqual(crm.get(tid)["booking_reference"], "BK-FRESH001")
+        self.assertEqual([c for c in calls if c[1] == "/v1/portal/bookings"].__len__(), 2)
+
+    def test_fresh_rate_too_expensive_goes_to_human(self):
+        tid = 6100
+        self.run_live(tid, [(410, "expired"), (200, {"rate_id": "R-fresh1234567", "total": "600.00"})])
+        self.assertEqual(db.session(tid)["status"], "needs_human")
+        self.assertEqual(crm.get(tid)["status"], "failed")
+
+    def test_portal_down_goes_to_human(self):
+        tid = 6200
+        self.run_live(tid, [(503, "booking system down, mail the airline")])
+        self.assertIn("book by email", db.session(tid)["note"])
+
+    def test_retry_200_counts_as_booked(self):
+        tid = 6300
+        self.run_live(tid, [(200, self.booked("BK-RETRY001")[1])])
+        self.assertEqual(crm.get(tid)["status"], "booked")
+
+
+class TestReplyVariety(unittest.TestCase):
+    V = {"ROUTE": "HAM to BOG", "AIRLINE": "Riverbend", "PRICE": "358.20 EUR", "REF": "BK-1", "TRANSIT": 3}
+
+    def test_many_variants_never_twice_in_a_row(self):
+        texts = [replies.render("booked", "en", self.V, thread_id=t, customer="anna.schmidt@x.mail")[0]
+                 for t in range(30)]
+        self.assertGreaterEqual(len(set(texts)), 10)
+        self.assertTrue(all(a != b for a, b in zip(texts, texts[1:])))
+        self.assertTrue(all("{" not in t for t in texts))     # every placeholder filled
+
+    def test_same_thread_same_text(self):
+        a = replies.render("confirmed", "de", self.V, thread_id=77)[0]
+        replies.render("confirmed", "de", self.V, thread_id=78)
+        self.assertEqual(a.split("\n\n")[1], replies.render("confirmed", "de", self.V, thread_id=77)[0].split("\n\n")[1])
+
+    def test_name_from_address(self):
+        self.assertEqual(replies.first_name("anna.schmidt@x.mail"), "Anna")
+        self.assertIsNone(replies.first_name("sales@x.mail"))
+        self.assertIsNone(replies.first_name("j.doe@x.mail"))
+        for t in range(10):
+            text = replies.render("booked", "de", self.V, thread_id=t, customer="sales@x.mail")[0]
+            self.assertNotIn("{NAME}", text)
+            self.assertNotIn("Frau", text)
+
+
+class TestCalendar(unittest.TestCase):
+    NOW = dt.datetime(2026, 11, 21, 15, 0, tzinfo=BERLIN)          # Saturday afternoon
+
+    def test_zone_detection(self):
+        z = meeting.customer_zone
+        self.assertEqual(str(z("call me, Singapore time", "x@y.mail")), "Asia/Singapore")
+        self.assertEqual(str(z("", "buyer@firma.de")), "Europe/Berlin")
+        self.assertEqual(z("I am on UTC+8", "x@y.mail").utcoffset(None), dt.timedelta(hours=8))
+
+    def test_slots_skip_weekend_busy_and_night(self):
+        ny = ZoneInfo("America/New_York")
+        slots, _ = meeting.free_slots(ny, now=self.NOW)
+        self.assertEqual(len(slots), 3)
+        for s in slots:
+            self.assertLess(s.weekday(), 5)                           # no weekend
+            local = s.astimezone(ny)
+            self.assertGreaterEqual(local.hour, 8)                    # not before 08:00 in New York
+            self.assertTrue(9 <= s.astimezone(BERLIN).hour < 18)      # inside our working hours
+        self.assertEqual(len({s.date() for s in slots}), 3)           # one per day
+
+    def test_busy_slot_is_avoided(self):
+        slots, _ = meeting.free_slots(BERLIN, now=self.NOW)
+        mon = [s for s in slots if s.date() == dt.date(2026, 11, 23)][0]
+        self.assertEqual(mon.astimezone(BERLIN).strftime("%H:%M"), "10:30")   # 09:00-10:30 team call is busy
+
+    def test_far_east_customer(self):
+        tokyo = ZoneInfo("Asia/Tokyo")
+        slots, _ = meeting.free_slots(tokyo, now=self.NOW)
+        for s in slots:
+            self.assertTrue(8 <= s.astimezone(tokyo).hour < 19)
 
 
 if __name__ == "__main__":
