@@ -19,6 +19,7 @@ try:                       # sourcing/bids.py does not exist yet. See CLAUDE.md 
     from sourcing import bids
 except ImportError:
     bids = None
+from booking import handlers as booking                  # task 04: accept -> book -> keep the customer informed
 
 _ZONES = os.path.join(config.ROOT, "kit", "start-kit", "pickup_zones.csv")
 ZONE_AIRPORT = {r["zone"]: r["airport"] for r in csv.DictReader(open(_ZONES))}
@@ -111,10 +112,12 @@ def handle_carrier_bid(mail):
 
 
 # route -> function(mail). Routes without a handler are saved and logged, nothing more.
-# TODO owners: follow_up (accept -> book), tariff (reload sheets), ratedesk, tracking (+10), booking_confirmation
+# TODO owners: tariff (reload sheets), ratedesk, tracking (+10), booking_confirmation
 HANDLERS = {
     "rfq": handle_rfq,
     "carrier_bid": handle_carrier_bid,
+    "follow_up": booking.handle_follow_up,
+    "booking_confirmation": booking.handle_booking_confirmation,
 }
 
 
