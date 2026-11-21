@@ -46,6 +46,13 @@ NEGATED_PROCEED = re.compile(r"\b(won'?t|will not|would not|do(es)?\s*n'?t|did\s
                              r"not|never|decided (not|against)|rather not|prefer not|hold off|"
                              r"nicht|werden nicht|m[oö]chten? nicht)\b[^.?!]{0,40}?"
                              r"\b(go(ing)? ahead|proceed|book|order|confirm|move forward|buch\w*|fortfahren|best[aä]tig\w*)\b", re.I)
+# Italian / French / Spanish "we do not proceed / confirm / book" (red-team #56: "Grazie, ma non procediamo con
+# questa offerta." was read as a yes and BOOKED, because ACCEPT's "procedi" matches inside "procediamo"). The verbs
+# are spelled out so an English "No problem, please book it" stays a yes.
+NEGATED_ROMANCE = re.compile(
+    r"\b(?:non|ne|n'|no)\s+(?:\w+\s+){0,2}?(?:procedi\w*|procede\w*|confermi\w*|conferma\w*|confirm(?:ons|erons|amos|aremos)|"
+    r"prenoti\w*|prenota\w*|accetti\w*|accetta\w*|acept(?:amos|aremos|o)|reserv(?:amos|aremos)|réserv(?:ons|erons)|"
+    r"donn(?:ons|erons)\s+(?:pas\s+)?suite|andiamo\s+avanti|vamos\s+a\s+(?:seguir|reservar|confirmar|proceder))", re.I)
 HEDGE = re.compile(r"\b(yet|still|for now|at the moment|right now|checking|review\w*|noch|momentan|gerade|pr[uü]f\w*)\b", re.I)
 PRICE = re.compile(r"\b(cheaper|better price|best price|lower( the)? price|discount|too expensive|too high|negotiat\w*|"
                    r"budget|match|günstiger|rabatt|zu teuer|preis\w* (senken|nachlass|verhandeln)|moins cher|"
@@ -98,7 +105,7 @@ def own_text(body, subject=""):
 def classify(body, subject=""):
     """accept / decline / better_price / faster / sending_docs / unclear. Only the customer's new text counts."""
     text = own_text(body, subject)
-    if DECLINE.search(text) or (NEGATED_PROCEED.search(text) and not HEDGE.search(text)):   # definitive "won't proceed" = decline; "not yet" = wait (unclear)
+    if DECLINE.search(text) or NEGATED_ROMANCE.search(text) or (NEGATED_PROCEED.search(text) and not HEDGE.search(text)):   # definitive "won't proceed" = decline; "not yet" = wait (unclear)
         return "decline"
     if PRICE.search(text):
         return "better_price"
