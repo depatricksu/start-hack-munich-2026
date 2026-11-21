@@ -86,6 +86,9 @@ def _breaks(code):
     return breaks
 
 
+LAST_DOWN = False   # True when the last options() saw the portal rate API return 503 (down). Then ask airlines+ratedesk by mail.
+
+
 def _rate(origin, destination, code, weight_kg, volume_cbm):
     """One rate read -> option dict, 'limit' on 429, 'error' on a transient failure, or None (not priced here).
     Never raises: one broken read must not cost the other airlines. It runs in worker threads, so it does not
@@ -98,6 +101,9 @@ def _rate(origin, destination, code, weight_kg, volume_cbm):
             return _miss("limit", r, float(r.get("retry_after", 5)) if isinstance(r, dict) else 5.0)
         if status in (500, 502, 504):                    # 503 is not transient here: "get this rate elsewhere"
             return _miss("error", "HTTP %s: %s" % (status, r))
+        if status == 503:                                # rate API down: get this rate elsewhere (email desk)
+            globals()["LAST_DOWN"] = True
+            return None
         if status != 200:
             return None
         return _option(r, origin, destination, code, weight_kg)
@@ -129,6 +135,7 @@ def options(origin, destination, weight_kg, volume_cbm=0, weight_break=None):
     Round 1 and 2 of the live game: the full-score teams booked at the next break (676 -> 1000, 1233 -> 2000 kg).
     The extra reads come last, so the rate limit (429) only ever costs the extra ones.
     """
+    globals()["LAST_DOWN"] = False
     from pricing import price as sheets
     use_break = sheets.WEIGHT_BREAK if weight_break is None else weight_break
     out = []

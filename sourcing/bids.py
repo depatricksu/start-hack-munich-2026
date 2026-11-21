@@ -107,7 +107,9 @@ def request(session, fields):
 
     subject = "Rate request %s-%s, %g kg" % (o, d, fields["weight_kg_total"])
     airlines = serving("airline", d)
-    if not options:                                   # nobody priced the lane: ask them all, and the rate desk, at once
+    from sourcing import portal
+    portal_down = getattr(portal, "LAST_DOWN", False)     # 5U turned the portal rate API off (503): its airlines are missing from options
+    if not options or portal_down:                    # no price, OR the portal is down: ask the airlines and the rate desk, and wait
         for c in airlines:
             pending += _ask(tid, c["name"], c["email"], "airline", True, subject, AIR_MAILS, ctx)
         pending += _ask(tid, "Rate desk", RATEDESK, "ratedesk", True, subject, AIR_MAILS, ctx)
