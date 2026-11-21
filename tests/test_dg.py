@@ -160,3 +160,20 @@ class Facts(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NoDoubleWeight(unittest.TestCase):
+    """core.main.shipment: the same total given twice must not be added (real requests 268, 1631, 5246)."""
+    def test_same_total_twice_is_one_shipment(self):
+        from core.main import shipment
+        f268 = {"weight_kg": 676, "volume_cbm": 5.79, "pieces": [{"count": 12, "kg_each": 56.33}]}
+        self.assertAlmostEqual(shipment(f268)[0], 676.0)
+        f5246 = {"weight_kg": 676, "volume_cbm": 3.44, "pieces": [{"count": 3, "kg_each": 225.33}]}
+        self.assertAlmostEqual(shipment(f5246)[0], 676.0)
+        dims = {"weight_kg": 500, "volume_cbm": 1.92, "pieces": [{"count": 2, "l_cm": 120, "w_cm": 80, "h_cm": 100}]}
+        self.assertAlmostEqual(shipment(dims)[1], 1.92)
+
+    def test_separate_lots_still_add_up(self):
+        from core.main import shipment
+        lots = {"weight_kg": 730, "pieces": [{"count": 4, "kg_each": 48}, {"count": 5, "kg_each": 206}]}
+        self.assertAlmostEqual(shipment(lots)[0], 730 + 192 + 1030)     # round 9: 1,952 kg
