@@ -10,9 +10,11 @@ import datetime as dt, re
 from core import db, mailbox
 from . import crm
 from .handlers import BK, TEAM_REF
+from shared.rfq import PICKUP_ZONES
 
 IATA = re.compile(r"\b([A-Z]{3})\b")
 KG = re.compile(r"(\d+(?:[.,]\d+)?)\s*kg", re.I)
+POSTCODE = re.compile(r"\b(\d{5})\b")        # the customer names the pickup site by postcode: 51447 -> zone 51 -> CGN
 
 STATUS_TEXT = {
     "requested": "booking requested with the airline, waiting for their confirmation",
@@ -31,6 +33,7 @@ EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 
 def _route_codes(text):
     codes = set(IATA.findall(text))
+    codes |= {PICKUP_ZONES[p[:2]] for p in POSTCODE.findall(text) if p[:2] in PICKUP_ZONES}
     try:
         from shared.rfq import extract_rfq
         r = extract_rfq("", text)                       # city names in any language -> IATA
@@ -84,6 +87,12 @@ def find_booking(text, mail=None):
             kg = float(m.group(1).replace(",", "."))
             close = [r for r in lane if r["weight_kg"] and abs(r["weight_kg"] - kg) <= 0.02 * kg]
             lane = close or lane
+    if not lane:                                        # origin written some way we cannot map: destination (+ weight) decides
+        kg = KG.search(text)
+        kg = float(kg.group(1).replace(",", ".")) if kg else None
+        near = lambda r: bool(kg and r["weight_kg"] and abs(r["weight_kg"] - kg) <= 0.02 * kg)
+        dest = [r for r in (by_cust or rows) if r["destination"] in codes] if codes else []
+        lane = [r for r in dest if near(r)] or (dest if by_cust else [])
     if len(lane) > 1 and by_cust:
         return lane[0], "customer, newest of %d" % len(lane)     # rows are newest first
     if len(lane) == 1:
