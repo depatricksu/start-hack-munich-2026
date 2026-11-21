@@ -27,12 +27,27 @@ _ZONES = os.path.join(config.ROOT, "kit", "start-kit", "pickup_zones.csv")
 ZONE_AIRPORT = {r["zone"]: r["airport"] for r in csv.DictReader(open(_ZONES))}
 
 
+NULLISH = {"", "null", "none", "n/a", "na", "unknown", "nil"}
+
+
+def _airport(v):
+    """A clean IATA code, or None. The model sometimes returns the string 'NULL' instead of a real null,
+    which must NOT block deriving the airport from the pickup postcode (live bug 21 Nov: round 10 lost)."""
+    v = str(v or "").strip()
+    return None if v.lower() in NULLISH else v.upper()
+
+
 def shipment(f):
-    """Total weight and volume from the extracted fields. All math is here, not in the LLM."""
+    """Total weight and volume. Several lots can arrive split: a total in weight_kg AND more lots in pieces that
+    carry their own kg_each. We ADD the piece weights the model gave on top of weight_kg so we never under-count
+    (live bug 21 Nov: round 9 priced 730 of 1952 kg -> rejected 'too_low'). Pieces with only dimensions (kg_each
+    null) add volume, not weight, so the normal single-shipment case is unchanged."""
     pieces = f.get("pieces") or []
-    weight = f.get("weight_kg") or sum((p.get("count") or 1) * (p.get("kg_each") or 0) for p in pieces)
-    volume = f.get("volume_cbm") or sum((p.get("count") or 1) * (p.get("l_cm") or 0) * (p.get("w_cm") or 0)
-                                        * (p.get("h_cm") or 0) for p in pieces) / 1e6
+    pieces_kg = sum((p.get("count") or 1) * (p.get("kg_each") or 0) for p in pieces)
+    pieces_cbm = sum((p.get("count") or 1) * (p.get("l_cm") or 0) * (p.get("w_cm") or 0) * (p.get("h_cm") or 0)
+                     for p in pieces) / 1e6
+    weight = float(f.get("weight_kg") or 0) + pieces_kg
+    volume = float(f.get("volume_cbm") or 0) + pieces_cbm
     return float(weight or 0), float(volume or 0)
 
 
@@ -46,6 +61,8 @@ def handle_rfq(mail):
 
     fields, usage = llm.extract(mail)                       # the one gateway call
     db.event("llm", tid, mail["id"], fields=fields, usage=usage)
+    fields["origin"] = _airport(fields.get("origin"))        # the string "NULL" must not block zone->airport
+    fields["destination"] = _airport(fields.get("destination"))
     postcode = str(fields.get("pickup_postcode") or "")
     if not fields.get("origin") and postcode[:2] in ZONE_AIRPORT:
         fields["origin"] = ZONE_AIRPORT[postcode[:2]]
@@ -76,7 +93,7 @@ def price_and_quote(tid, mail, fields, asked=False):
     if weight > 100_000 or not (0 <= volume <= 1000):         # portal limits: never quote outside them
         return needs_human(tid, mail, "weight %s kg / volume %s cbm out of range" % (weight, volume))
 
-    o, d = fields["origin"].upper(), fields["destination"].upper()
+    o, d = fields["origin"], fields["destination"]           # already clean IATA from _airport()
     options = [dict(x, total_eur=x["total"]) for x in sheets.options(o, d, weight, volume)]
     try:
         options += portal.options(o, d, weight, volume)
