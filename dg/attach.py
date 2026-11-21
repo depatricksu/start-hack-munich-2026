@@ -116,6 +116,8 @@ def check_mail(mail):
             data = download(mail["id"], att)
             if data:
                 files.append((name, data))
+        from .facts import remember
+        remember(mail.get("id"), "\n".join(attachment_text(data, name) for name, data in files))
         found = scan_attachments(files)
         if found:
             return found

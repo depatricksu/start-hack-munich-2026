@@ -113,5 +113,28 @@ class Attachments(unittest.TestCase):
         self.assertIsNone(dg.scan_attachments([]))
 
 
+class Facts(unittest.TestCase):
+    def test_packing_list_numbers(self):
+        text = "Carton 1 gross weight 250 kg\nTotal gross weight: 1,250 kg\nTotal pieces: 5\nVolume: 6.4 cbm"
+        self.assertEqual(dg.packing_facts(text), {"gross_kg": 1250.0, "pieces": 5, "volume_cbm": 6.4})
+
+    def test_german_and_dimensions(self):
+        f = dg.packing_facts("Bruttogewicht: 1.250,5 kg\n120 x 80 x 100 cm 2 pallets")
+        self.assertEqual(f["gross_kg"], 1250.5)
+        self.assertAlmostEqual(f["volume_cbm"], 1.92)
+
+    def test_compare_flags_only_real_differences(self):
+        from dg import facts
+        facts.remember(99, "Total gross weight: 1,250 kg")
+        self.assertEqual(dg.compare({"weight_kg_total": 950}, {"id": 99}),
+                         {"gross_kg": {"mail": 950.0, "attachment": 1250.0}})
+        self.assertEqual(dg.compare({"weight_kg_total": 1240}, {"id": 99}), {})     # within 2 %
+        self.assertEqual(dg.compare({"weight_kg_total": 950}, {"id": 123}), {})     # no attachment text
+
+    def test_nothing_found(self):
+        self.assertEqual(dg.packing_facts("Hello, general cargo"), {})
+        self.assertFalse(dg.override())
+
+
 if __name__ == "__main__":
     unittest.main()
