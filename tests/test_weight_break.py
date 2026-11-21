@@ -9,9 +9,11 @@ YT_MUC_LAX = next(r for r in price._load() if r["airline"] == "Yellowtail Air Fr
 
 
 class TestWeightBreak(unittest.TestCase):
-    def test_off_by_default(self):
-        self.assertFalse(price.WEIGHT_BREAK)
-        o = price.price_lane(YT_MUC_LAX, 230)
+    def test_on_by_default(self):
+        self.assertTrue(price.WEIGHT_BREAK)
+
+    def test_off(self):
+        o = price.price_lane(YT_MUC_LAX, 230, weight_break=False)
         self.assertEqual(o["total"], "699.20")            # 230 x 1.73 + 230 x 1.31
         self.assertEqual(o["billed_kg"], "230")
 
@@ -22,7 +24,7 @@ class TestWeightBreak(unittest.TestCase):
 
     def test_on_never_more_expensive(self):
         for kg in (10, 44, 45, 99, 120, 240, 260, 480, 999, 1500, 2500):
-            off = Decimal(price.price_lane(YT_MUC_LAX, kg)["total"])
+            off = Decimal(price.price_lane(YT_MUC_LAX, kg, weight_break=False)["total"])
             on = Decimal(price.price_lane(YT_MUC_LAX, kg, weight_break=True)["total"])
             self.assertLessEqual(on, off, kg)
 

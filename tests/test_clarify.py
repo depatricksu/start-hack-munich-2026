@@ -36,7 +36,7 @@ class TestClarify(unittest.TestCase):
         self.assertEqual(s["status"], "quoted", s["note"])
         self.assertEqual(json.loads(s["chosen"])["airline"], "Cobalt Skylift")
         self.assertEqual(len(out(88001)), 2)
-        self.assertIn("470.70", out(88001)[1]["body"])
+        self.assertIn("432.00", out(88001)[1]["body"])
 
     def test_german_question(self):
         f = {"language": "de"}

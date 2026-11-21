@@ -61,8 +61,8 @@ def chargeable_kg(weight_kg, volume_cbm=0):
 
 
 # Weight-break trick: billing at the next break start can be cheaper (lower rate x a bit more weight).
-# Off until 5U confirms its scorer uses it (CLAUDE.md open question). WEIGHT_BREAK=1 turns it on.
-WEIGHT_BREAK = os.environ.get("WEIGHT_BREAK", "0") == "1"
+# Evidence 16:14: winners billed 1000 kg for 676 kg and 2000 kg for 1233 kg and scored full price points. WEIGHT_BREAK=0 turns it off.
+WEIGHT_BREAK = os.environ.get("WEIGHT_BREAK", "1") == "1"   # ON since 21 Nov 16:15: board shows 5U's best price uses it
 
 
 def _total_at(rec, billed):

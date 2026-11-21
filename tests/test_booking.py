@@ -96,11 +96,11 @@ class TestOutcomes(unittest.TestCase):
 
     def test_better_price_small_shipment_keeps_best_rate(self):
         tid = 4000
-        quote(tid)                                            # cheapest already quoted, 470.70 EUR < 1500
+        quote(tid)                                            # cheapest already quoted, 432.00 EUR < 1500
         answer(tid, 1, "Too expensive for us. Can you do a better price?")
         s = db.session(tid)
         self.assertEqual(s["status"], "quoted")               # offer stays open, a "book it" still books
-        self.assertIn("470.70 EUR", sent(tid)[-1]["body"])
+        self.assertIn("432.00 EUR", sent(tid)[-1]["body"])
         answer(tid, 2, "Ok, please book it.")
         self.assertEqual(crm.get(tid)["status"], "requested")
 
@@ -111,7 +111,7 @@ class TestOutcomes(unittest.TestCase):
         answer(tid, 1, "Hmm, is there something cheaper?")
         body = sent(tid)[-1]["body"]
         self.assertIn("Cobalt Skylift", body)
-        self.assertIn("470.70 EUR", body)
+        self.assertIn("432.00 EUR", body)
         self.assertEqual(json.loads(db.session(tid)["chosen"])["airline"], "Cobalt Skylift")
         answer(tid, 2, "Great, book it.")                     # books the cheaper one
         self.assertEqual(crm.get(tid)["airline"], "Cobalt Skylift")
@@ -211,13 +211,13 @@ class TestPortalErrors(unittest.TestCase):
             answer(tid, 1, "Please book it.")
         return calls
 
-    def booked(self, ref, price="470.70"):
+    def booked(self, ref, price="432.00"):
         return 201, {"booking_reference": ref, "rate_id": "R-x", "price": price, "currency": "EUR",
                      "airline": "Riverbend Cargo", "airline_code": "RB", "status": "booked", "team_reference": "t"}
 
     def test_expired_rate_gets_fresh_rate(self):
         tid = 6000
-        calls = self.run_live(tid, [(410, "expired"), (200, {"rate_id": "R-fresh1234567", "total": "471.00"}),
+        calls = self.run_live(tid, [(410, "expired"), (200, {"rate_id": "R-fresh1234567", "total": "440.00"}),
                                     self.booked("BK-FRESH001")])
         self.assertEqual(crm.get(tid)["booking_reference"], "BK-FRESH001")
         self.assertEqual([c for c in calls if c[1] == "/v1/portal/bookings"].__len__(), 2)
