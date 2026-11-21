@@ -195,6 +195,40 @@ def send_quote(tid, to, subject, body):
     return False
 
 
+ARRIVE_BY = r"arriv\w*|latest|no later|deadline|spätestens|must|needed|benötigt|before|ankommen|eintreffen|vor Ort"
+
+
+def max_transit_days(text):
+    """'Ready 24 Nov, MUST arrive by 27 Nov' -> 3. None when the mail states no arrival deadline (or no ready date).
+    Red-team run 21 Nov: 'cheapest, but must arrive by ...' got the 6-day flight that lands 3 days late.
+    Only strong arrival words count: 'we deliver to FRA on <date>' is a drop-off, not a deadline."""
+    from humanize.polish import _dates_near, _ready_date, READY_WORDS
+    ready = _ready_date(text or "")
+    ready_all = set(_dates_near(text or "", READY_WORDS, before=25, whole_word=False))   # tight: own words only
+    dl = [d for d in _dates_near(text or "", ARRIVE_BY) if d not in ready_all]
+    if not ready or not dl or min(dl) <= ready:
+        return None
+    return (min(dl) - ready).days
+
+
+def _days(x):
+    try:
+        return float(x["transit_days"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def by_deadline(tid, options, fields):
+    """Keep the options that land in time. None lands in time -> all of them, and the fastest is taken."""
+    first = db.con().execute("SELECT body FROM mails WHERE id=?", (tid,)).fetchone()
+    limit = max_transit_days(first[0] if first else "")
+    if limit is None:
+        return options, False
+    ok = [x for x in options if _days(x) is not None and _days(x) <= limit]
+    db.event("deadline", tid, max_transit_days=limit, in_time=len(ok), options=len(options))
+    return (ok, False) if ok else (options, True)
+
+
 def finalize(tid):
     """Pick the best option and send the one quote. Called right away, or when the bid wait is over."""
     s = db.session(tid)
@@ -202,7 +236,8 @@ def finalize(tid):
     options = bids.final_options(tid, options)               # add bids, add trucker leg
     if not options:
         return needs_human(tid, None, "no price found for this lane")
-    if fields.get("prefer") == "fastest":
+    options, too_late = by_deadline(tid, options, fields)    # "must arrive by <date>": drop flights that land late
+    if fields.get("prefer") == "fastest" or too_late:
         best = min(options, key=lambda x: (x["transit_days"], Decimal(x["total_eur"])))
     else:
         best = min(options, key=lambda x: Decimal(x["total_eur"]))

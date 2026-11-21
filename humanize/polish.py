@@ -14,7 +14,7 @@ Never touches a digit of the price, never makes a gateway call, never raises (an
 """
 import datetime, re
 
-CLOSINGS = r"(?:best|bests|ciao|cheers|thanks|thx|regards|(?:kind |best |warm |many )?(?:regards|greetings|wishes|thanks|thank you(?: in advance)?|cheers|grüße|gruesse|grüßen|mit freundlichen grüßen|viele grüße|best greetings.*|cordiali saluti|saludos|cordialement))"
+CLOSINGS = r"(?:best|bests|ciao|cheers|thanks|thx|regards|(?:kind |best |warm |many )?(?:regards|greetings|wishes|thanks|thank you(?: in advance)?|cheers|grüße|gruesse|grüßen|gruß|gruss|pozdrawiam|pozdrowienia|groeten|saluti|saudações|atenciosamente|hälsningar|mit freundlichen grüßen|viele grüße|best greetings.*|cordiali saluti|saludos|cordialement))"
 
 
 def signed_name(customer_mail):
@@ -26,11 +26,14 @@ def signed_name(customer_mail):
             m = re.match(r"([A-ZÄÖÜ][a-zäöüß]+)(?: [A-ZÄÖÜ][a-zäöüß\-]+)?$", tail[i + 1])
             if m:
                 return m.group(1)
-    for line in tail:                                        # no closing line: a lone "Sara" / "Anna Sonnberg" line
-        m = re.fullmatch(r"([A-ZÄÖÜ][a-zäöüß]+)(?: [A-ZÄÖÜ][a-zäöüß\-]+)?", line)
-        if m and not re.fullmatch(CLOSINGS + r"[ ,.!]*", line, re.I) and \
-                not re.search(r"gmbh|ag\b|ltd|inc|medtech|logistics|audio|sport|team", line, re.I):
-            return m.group(1)
+    # no closing line we know: a lone "Anna Sonnberg" line first, then a lone "Sara". Two words first, so a closing
+    # in a language we do not list ("Pozdrawiam" / "Gruß" above "Katarzyna Nowak") is never taken for the name.
+    for pattern in (r"([A-ZÄÖÜ][a-zäöüß]+) [A-ZÄÖÜ][a-zäöüß\-]+", r"([A-ZÄÖÜ][a-zäöüß]+)"):
+        for line in tail:
+            m = re.fullmatch(pattern, line)
+            if m and not re.fullmatch(CLOSINGS + r"[ ,.!]*", line, re.I) and \
+                    not re.search(r"gmbh|ag\b|ltd|inc|medtech|logistics|audio|sport|team", line, re.I):
+                return m.group(1)
     return None
 
 

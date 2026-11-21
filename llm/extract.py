@@ -316,6 +316,8 @@ def final_reply(template, best, fields, customer="", thread_id=0):
     reasons == [] : the text went out as written. Otherwise the model's text failed for these reasons and the body
     is one of our own human templates instead (same price). No gateway call."""
     lang = reply_lang(fields)
+    if (fields.get("language") or "en").lower()[:2] != lang:  # a language we have no texts for (Polish...): one
+        template = ""                                        # clean English mail, never their text + our English lines
     if fields.get("reply_ok") is False:                      # safe_reply already replaced the model's text: let the
         template = ""                                        # thread pick one of our own mails, not always the first
     names = [n for n in re.split(r"[._\-+]", (customer or "").split("@")[0]) if len(n) > 3]
@@ -369,6 +371,52 @@ def _fill_places(fields, mail):
         if not fields.get(k) and getattr(r, k):
             fields[k] = getattr(r, k)
             fields.setdefault("filled_by_code", []).append(k)
+
+
+_LB = re.compile(r"(\d[\d,.]*)\s*(?:lbs?|pounds?)\b", re.I)
+_INCHES = re.compile(r"(\d+(?:\.\d+)?)\s*[x\u00d7*]\s*(\d+(?:\.\d+)?)\s*[x\u00d7*]\s*(\d+(?:\.\d+)?)\s*"
+                     r"(?:in\b|inch(?:es)?\b|\"|'')", re.I)
+
+
+def _same(a, b):
+    try:
+        return a is not None and b is not None and abs(float(a) - float(b)) <= 0.005 * max(float(b), 1)
+    except (TypeError, ValueError):
+        return False
+
+
+def fix_units(fields, mail):
+    """US shippers write pounds and inches. A small model copies '2,200 lbs' into weight_kg and '48 x 40 x 50 in'
+    into l_cm/w_cm/h_cm (red-team run 21 Nov: priced 2,200 kg instead of 998 kg). Code converts every number the
+    model copied unchanged from a lb / inch value. A number the model already converted matches nothing and stays."""
+    from shared.rfq import _num
+    text = "%s\n%s" % (mail.get("subject") or "", mail.get("body") or "")
+    lbs = []
+    for m in _LB.finditer(text):
+        try:
+            lbs.append(_num(m.group(1).rstrip(".,")))
+        except ValueError:
+            pass
+    dims = [tuple(float(m.group(i)) for i in (1, 2, 3)) for m in _INCHES.finditer(text)]
+    if not lbs and not dims:
+        return []
+    fixed = []
+    for f in [fields] + list(fields.get("shipments") or []):
+        if any(_same(f.get("weight_kg"), n) for n in lbs):
+            fixed.append("weight_kg %s lb" % f["weight_kg"])
+            f["weight_kg"] = round(float(f["weight_kg"]) * 0.45359237, 1)
+        for p in f.get("pieces") or []:
+            if any(_same(p.get("kg_each"), n) for n in lbs):
+                fixed.append("kg_each %s lb" % p["kg_each"])
+                p["kg_each"] = round(float(p["kg_each"]) * 0.45359237, 1)
+            got = (p.get("l_cm"), p.get("w_cm"), p.get("h_cm"))
+            if all(got) and any(all(_same(g, d) for g, d in zip(got, dim)) for dim in dims):
+                fixed.append("dims %sx%sx%s in" % got)
+                p["l_cm"], p["w_cm"], p["h_cm"] = (round(float(x) * 2.54, 1) for x in got)
+    if fixed:
+        fields.setdefault("filled_by_code", []).append("units")
+        fields["unit_fix"] = fixed
+    return fixed
 
 
 def _text(mail):
@@ -493,6 +541,8 @@ def extract(mail):
             raise RuntimeError("gateway returned unparsable JSON twice: %s" % str(data2)[:300])
         data = _merge_usage(data, data2)
     _fill_places(fields, mail)
+    if fix_units(fields, mail):                          # lb / inch copied as kg / cm: converted in code
+        _log("unit_fix", tid, fixed=fields["unit_fix"])
     _annotate(fields, mail, detected)
     fields["reply"], fields["reply_ok"] = safe_reply(fields.get("reply"), fields.get("language"),
                                                      multi=len(fields.get("shipments") or []) > 1)
