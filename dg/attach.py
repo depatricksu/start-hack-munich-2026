@@ -74,7 +74,8 @@ def _pdf(data):
 IMAGE_EXT = (".jpg", ".jpeg", ".png", ".heic", ".tif", ".tiff", ".gif", ".bmp", ".webp")
 OCR_SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ocr.swift")
 OCR_BIN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "ocr_bin")   # data/ is git-ignored
-OCR_TIMEOUT_S = float(os.environ.get("DG_OCR_TIMEOUT_S", "10"))
+OCR_TIMEOUT_S = float(os.environ.get("DG_OCR_TIMEOUT_S", "5"))
+_OCR_OFF_UNTIL = [0.0]   # circuit breaker: after a failure, skip OCR for 10 minutes so no request waits again
 
 
 def ocr_binary():
@@ -97,6 +98,9 @@ def ocr_binary():
 
 def ocr(data, suffix):
     """Text in a photo / scan (macOS Vision, ~0.8 s). "" when not possible."""
+    import time
+    if time.time() < _OCR_OFF_UNTIL[0]:
+        return ""
     binary = ocr_binary()
     if not binary:
         return ""
@@ -105,11 +109,14 @@ def ocr(data, suffix):
         path = f.name
     try:
         r = subprocess.run([binary, path], capture_output=True, text=True, timeout=OCR_TIMEOUT_S)
-        return r.stdout if r.returncode == 0 else ""
+        if r.returncode == 0:
+            return r.stdout
     except Exception:
-        return ""
+        pass
     finally:
         os.unlink(path)
+    _OCR_OFF_UNTIL[0] = time.time() + 600
+    return ""
 
 
 def attachment_text(data, filename=""):
