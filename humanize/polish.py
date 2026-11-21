@@ -39,7 +39,7 @@ READY_WORDS = r"ready|pick ?up|pickup|collect|collection|available|bereit|abhol|
 DEADLINE_WORDS = r"arriv\w*|deliver\w*|by|before|latest|no later|deadline|until|spätestens|bis|benötigt|needed|must"
 
 
-def _dates_near(text, words, before=45, whole_word=True):
+def _dates_near(text, words, before=90, whole_word=True):
     """Dates whose preceding text (same sentence, up to `before` chars) contains one of `words`."""
     out, prev_end = [], 0
     for m in re.finditer(DATE, text or ""):
@@ -88,7 +88,8 @@ def _sentences(body, fields, best, mail, lang):
     out = []
     asks_arrival = re.search(r"\barriv|\beta\b|\bland(?:s|ed|ing)?\b|ankunft|ankommen|eintreff|liefertermin|"
                              r"\bwann\b[^.?\n]*\ban\b|\bwhen\b[^.?\n]*\b(?:there|delivered)\b", low_mail)
-    asks_departure = re.search(r"departure|abflug|depart", low_mail)
+    asks_departure = re.search(r"(?:earliest|next|first|when\b[^.?\n]*)\s*(?:possible\s+)?(?:departure|depart|flight)\b(?!\s+airport)|"
+                               r"departure date|abflugdatum|wann\b[^.?\n]*abflug", low_mail)   # not "departure airport"
     has_date = (re.search(r"\b\d{1,2}(?:\.\d{1,2}\.| (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec))\b", body)
                 or re.search(r"\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri)\b", body, re.I)
                 or re.search(r"\b20\d\d-\d\d-\d\d\b", body))

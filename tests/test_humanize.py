@@ -74,3 +74,16 @@ class Layout(unittest.TestCase):
         self.assertNotIn("28.11.", body)
         self.assertTrue(body.rstrip().endswith("Lena Hofmann\nLuftfracht Export"))
         self.assertEqual(re.findall(r"\d+\.\d\d", body), ["1599.41"])
+
+
+class Departure(unittest.TestCase):
+    def test_departure_airport_is_not_a_question(self):
+        mail = ("Please arrange the truck from our site to the departure airport. Goods ready for pickup on 2026-11-25."
+                "\n\nKind regards\nAnna Sonnberg")
+        body, changes = humanize.polish("Hi Anna,\n\nTotal 900.00 EUR.\n\nBest regards\nLena", {}, {"transit_days": 3}, mail)
+        self.assertNotIn("answered_ask", changes)
+
+    def test_earliest_departure_is_a_question(self):
+        mail = "Goods ready 2026-11-27. Please let me know the earliest departure.\n\nTobias Auer"
+        body, changes = humanize.polish("Hi Tobias,\n\nTotal 900.00 EUR.\n\nBest regards\nLena", {}, {"transit_days": 3}, mail)
+        self.assertIn("answered_ask", changes)
