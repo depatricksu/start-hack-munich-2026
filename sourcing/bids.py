@@ -315,8 +315,19 @@ def final_options(thread_id, options):
                                   "currency": b["currency"], "total": b["total"], "total_eur": b["total_eur"],
                                   "source": "bid", "bid_id": b["id"]}]
         db.event("bids_merged", thread_id, added=[[b["carrier"], b["total_eur"], b["transit_days"]] for b in air])
-    if not options:                                   # lane priced by bids only: pick by the booth rule
-        if air:
+    if not options and air:                           # lane priced by bids only
+        if (prefer or "").lower() in ("cheapest", "fastest"):   # explicit wish: add EVERY bid, let finalize honour it.
+            # A single balanced pre-pick quoted the faster bid on a 'cheapest' request (round 47 STR-EZE: Nova Atlas 1833
+            # was cheapest, we quoted Fjordline 2604 -> too_high).
+            for b in air:
+                days = b["transit_days"] if b["transit_days"] is not None else 99   # unknown speed never wins "fastest"
+                options = options + [{"airline": b["carrier"], "origin": fields.get("origin"),
+                                      "destination": fields.get("destination"), "transit_days": int(-(-float(days) // 1)),
+                                      "currency": b["currency"], "total": b["total"], "total_eur": b["total_eur"],
+                                      "source": "bid", "bid_id": b["id"]}]
+            db.event("bids_only_options", thread_id, prefer=prefer,
+                     candidates=[[b["carrier"], b["total_eur"], b["transit_days"]] for b in air])
+        else:                                         # no stated preference: the balanced bid (5U's scorer default)
             b, how = pick_bid(air, prefer)
             db.event("bid_picked", thread_id, role="airline", how=how, carrier=b["carrier"], total_eur=b["total_eur"],
                      candidates=[[x["carrier"], x["total_eur"], bid_hours(x)] for x in air])
