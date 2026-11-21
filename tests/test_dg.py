@@ -160,3 +160,25 @@ class Facts(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ZoneOrigin(unittest.TestCase):
+    def test_pickup_zone_airport_wins_over_llm_origin(self):
+        """Round 17: pickup 72146 (zone 72 = STR), the LLM said FRA, 5U priced from STR."""
+        from core import main
+        self.assertEqual(main.ZONE_AIRPORT.get("72"), "STR")
+        seen = {}
+        orig_gate = main.rfq_gate
+        main.rfq_gate = lambda fields, mail: (seen.setdefault("origin", fields.get("origin")), (False, "stop here"))[1]
+        orig_event = main.db.event
+        main.db.event = lambda *a, **k: None
+        orig_nh = main.needs_human
+        main.needs_human = lambda *a, **k: None
+        orig_clar = main.clarify.only_missing
+        main.clarify.only_missing = lambda *a, **k: []
+        try:
+            main.price_and_quote("t17", {"id": 1}, {"origin": "FRA", "destination": "EZE", "pickup_postcode": "72146"})
+        finally:
+            main.rfq_gate, main.db.event, main.needs_human = orig_gate, orig_event, orig_nh
+            main.clarify.only_missing = orig_clar
+        self.assertEqual(seen["origin"], "STR")

@@ -85,6 +85,10 @@ def handle_rfq(mail):
 def price_and_quote(tid, mail, fields, asked=False):
     """Everything after the gateway call. Also re-entered by llm/clarify.py when the customer answered our question."""
     postcode = str(fields.get("pickup_postcode") or "")
+    zone_airport = ZONE_AIRPORT.get(postcode[:2])
+    if zone_airport and fields.get("origin") != zone_airport:   # door-to-port: the truck goes to the ZONE's airport (Riky)
+        db.event("origin_from_zone", tid, mail["id"], was=fields.get("origin"), now=zone_airport, postcode=postcode)
+        fields["origin"] = zone_airport                      # round 17 lost: LLM said FRA, zone 72 = STR, 5U priced STR
     weight, volume = fields.get("weight_kg_total") or 0, fields.get("volume_cbm_total") or 0
     if len(fields.get("shipments") or []) > 1:               # several shipments in one mail (pricing/multi.py, Patrick)
         return multi.handle(tid, mail, fields)
