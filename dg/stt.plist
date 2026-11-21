@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>ai.fiveu.forwarder.stt</string>
+<key>CFBundleName</key><string>forwarder-stt</string>
+<key>NSSpeechRecognitionUsageDescription</key><string>Turn a customer's voice message into text so the forwarder can quote it.</string>
+</dict></plist>
