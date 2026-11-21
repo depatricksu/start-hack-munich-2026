@@ -9,7 +9,7 @@ To add a feature, write a handler in your own folder and register it in HANDLERS
 """
 import csv, json, os, re, sys, time, traceback
 from decimal import Decimal
-from . import config, db, mailbox
+from . import config, db, mailbox, safety
 from router.route import route
 from llm import extract as llm
 from pricing import price as sheets
@@ -189,8 +189,14 @@ def tick():
 def run():
     if not config.API_KEY:
         sys.exit("FIVEU_API_KEY is missing. Put it in .env, or test with: LLM_FAKE=1 python -m core.main --fake examples/rfq.json")
+    safety.lock()                                            # only ONE clerk per database, or mails go out twice
     since = int(db.get_state("since_id", 0))
-    db.event("start", dry_run=config.DRY_RUN, since_id=since, model=config.LLM_MODEL, bid_wait_s=config.BID_WAIT_S)
+    commit = safety.commit()
+    db.set_state("commit", commit)
+    db.set_state("started_at", time.time())
+    db.set_state("supervised", "1" if safety.SUPERVISED else "0")
+    db.event("start", dry_run=config.DRY_RUN, since_id=since, model=config.LLM_MODEL, bid_wait_s=config.BID_WAIT_S,
+             commit=commit, supervised=safety.SUPERVISED)
     while True:
         try:
             mails, nxt = mailbox.poll(since)
@@ -203,8 +209,12 @@ def run():
                 db.set_state("since_id", since)
             tick()
             actions.tick()                                   # human replies from the UI (actions/queue.py)
+            db.set_state("heartbeat", time.time())           # the UI can show "clerk alive" from this
         except Exception as e:                               # network hiccup: log and keep going
             db.event("loop_error", error=str(e))
+        if safety.restart_wanted():                          # asked by `python3 -m core.restart`, between two turns
+            db.event("restart", commit=commit)
+            sys.exit(0)                                      # core/supervise.py starts the new code
         time.sleep(config.POLL_S)
 
 

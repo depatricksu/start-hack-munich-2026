@@ -101,9 +101,16 @@ env var. Time score: full under 120 s, zero at 360 s. Change it in `.env` on Eri
 cp env.example .env   # fill in keys (Erik only for live)
 DRY_RUN=1 python3 -m core.main                 # everyone: reads the mailbox, never sends, never calls the gateway
 DRY_RUN=1 LLM_FAKE=0 python3 -m core.main      # also call the real gateway (costs money, use rarely)
-DRY_RUN=0 caffeinate -i python3 -m core.main   # Erik's MacBook only, ONE process
+DRY_RUN=0 python3 -m core.supervise            # Erik's MacBook only: starts the clerk, restarts it after a crash
+python3 -m core.restart                        # runner, after `git pull`: tests + fake mail, then a clean restart
+python3 -m core.restart --check                # anyone: is my code safe to go live?
 python3 -m core.main --fake examples/rfq.json  # no key, no network: one fake mail through the whole loop
 python3 -m core.stats                          # numbers to calibrate with
 python3 -m pricing.price FRA LAX 120 0.9       # price check
 ```
-No extra packages needed (standard library only, Python 3.9+).
+## Going live with new code (the runner)
+The running clerk keeps its OLD code in memory. `git pull` alone changes nothing live. To update: `git pull`, then
+`python3 -m core.restart`. It restarts the clerk only if the code imports, all tests pass and a fake mail gets a quote.
+If a check fails, the old code keeps running: fix, pull, run it again. Never Ctrl+C the clerk to update it.
+A second clerk on the same DB refuses to start (lock file `data/clerk.lock`). The `start` event logs the commit.
+Before you push: `python3 -m core.restart --check` on your own machine. A push that fails it cannot go live.
