@@ -42,6 +42,13 @@ BID_MAX_WAIT_S = float(os.environ.get("BID_MAX_WAIT_S", "300"))
 # 1 = on normal requests also ask up to 3 airlines by mail, without waiting, to learn if bids beat sheet/portal.
 # Turn off (0) once we know. See `python -m core.stats`.
 BID_EXPERIMENT = os.environ.get("BID_EXPERIMENT", "1") == "1"
+# 1 = ask up to BID_MAX_CARRIERS carriers + the rate desk on EVERY request and WAIT for them, even when the
+# portal/sheet already priced the lane. The brief mandates pricing from "sheets, portal AND bids from 2 to 5
+# carriers", and board evidence (21 Nov) shows airline bids beat our portal/sheet price ~80% of the time, so
+# skipping them loses "cheapest"/"fastest" rounds as too_high. Costs ~BID_WAIT_S of latency per quote (still
+# under the 120 s full-time window). Overrides BID_EXPERIMENT when on.
+BID_ALWAYS = os.environ.get("BID_ALWAYS", "0") == "1"
+BID_MAX_CARRIERS = int(os.environ.get("BID_MAX_CARRIERS", "5"))   # the brief: bids from 2 to 5 carriers
 QUOTE_EUR = os.environ.get("QUOTE_EUR", "1") == "1"        # quote in EUR even if the cheapest flight came in USD
 # Which bid we take among truckers / airline bids (sourcing/bids.py pick_bid).
 # balanced (default) = price and speed 50/50. Board evidence 21 Nov (rounds 1, 2, 4 fit to the cent): 5U's scorer
