@@ -60,3 +60,21 @@ class TestNoFalseDG(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestReviewFindings(unittest.TestCase):
+    """Fresh-eyes review 21 Nov 19:05: each of these would cost a round."""
+    def test_not_dg(self):
+        for t in ("Dangerous goods: | No", "Dangerous goods: Not restricted", "Dangerous goods: nil", "Hazmat: No",
+                  "Gefahrgut: entfällt", "This is not DGR cargo", "contains no aerosols, paints, lithium batteries or dry ice",
+                  "Keine Powerbanks", "ohne Li-Ion-Akkus", "lighter fixtures", "Demand flares up", "explosive growth",
+                  "Anti-oxidizing coating", "Plastic caps for aerosol cans", "cases for power banks",
+                  "Chargers for lithium batteries (no batteries)", "Empty perfume bottles"):
+            self.assertIsNone(quote.read_declaration(t), t)
+
+    def test_german_dg(self):
+        for t, un in (("Spraydosen, 4 Kartons", "UN1950"), ("Lithium-Ionen-Akkus", "UN3481"), ("Trockeneis 20 kg", "UN1845")):
+            self.assertEqual(quote.read_declaration(t)["un"], un, t)
+
+    def test_table_cell_with_a_real_declaration(self):
+        self.assertEqual(quote.read_declaration("Dangerous goods: | UN1950 aerosols")["un"], "UN1950")

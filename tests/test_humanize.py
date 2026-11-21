@@ -87,3 +87,29 @@ class Departure(unittest.TestCase):
         mail = "Goods ready 2026-11-27. Please let me know the earliest departure.\n\nTobias Auer"
         body, changes = humanize.polish("Hi Tobias,\n\nTotal 900.00 EUR.\n\nBest regards\nLena", {}, {"transit_days": 3}, mail)
         self.assertIn("answered_ask", changes)
+
+
+class ReviewFindings(unittest.TestCase):
+    """Fresh-eyes review 21 Nov 19:05."""
+    def test_greeting_never_eats_the_price(self):
+        body, _ = humanize.polish("Hi there! Our all-in price is 2,780.00 EUR with X.\n\nBest regards\nLena", {}, {},
+                                  "Quote pls\n\nBest\nDeniz Yilmaz")
+        self.assertIn("2,780.00 EUR", body)
+
+    def test_german_closings_and_departments(self):
+        for mail, name in (("Freundliche Grüße\nTobias Auer", "Tobias"), ("Liebe Grüße\nAnna", "Anna"), ("Danke\nTom Weber", "Tom"),
+                           ("Kind regards\nLogistics Team", None), ("Regards\nAcme Logistics", None)):
+            self.assertEqual(humanize.signed_name(mail), name, mail)
+
+    def test_sentence_lands_before_best_and_not_above_the_price(self):
+        body, _ = humanize.polish("Thanks for your request.\n\nTotal 900.00 EUR.\n\nBest,\nLena Hofmann\nAir Export\nGoogle\nMunich",
+                                  {}, {}, "Do you include insurance?\n\nBest\nTom")
+        self.assertLess(body.index("900.00"), body.index("Cargo insurance"))
+        self.assertLess(body.index("Cargo insurance"), body.index("Best,"))
+
+    def test_arrival_airport_and_deadline_only(self):
+        r = "Hi Tom,\n\nTotal 900.00 EUR.\n\nBest regards\nLena"
+        self.assertEqual(humanize.polish(r, {"destination": "JFK"}, {"transit_days": 3},
+                                         "Arrival airport: JFK. Ready 2026-11-25.\n\nBest\nTom")[1], [])
+        self.assertEqual(humanize.polish(r, {"destination": "JFK"}, {"transit_days": 3},
+                                         "It must arrive by 2026-12-01 because pickup is slow. When will it arrive?\n\nBest\nTom")[1], [])

@@ -23,11 +23,11 @@ from decimal import Decimal, ROUND_HALF_UP
 UN = re.compile(r"\bUN\s?-?(\d{4})\b", re.I)
 CLASS = re.compile(r"\b(?:class|klasse|classe|clase)\s*[:.]?\s*(\d(?:\.\d)?)\b", re.I)
 NAME_AFTER = re.compile(r"\bUN\s?-?\d{4}\b[\s,;:/-]*(?:(?:class|klasse)\s*[:.]?\s*\d(?:\.\d)?[\s,;:/-]*)?([A-Za-z][A-Za-z ,()-]{2,60})", re.I)
-DECLARES = re.compile(r"dangerous goods\s*[:=][ \t]*(?=\S)(?!no\b|none\b|n/?a\b|-)|gefahrgut\s*[:=][ \t]*(?=\S)(?!nein\b|keine?\b)"
-                      r"|\bDGR\b|\bhazmat\b"
+_NO = r"(?:no\b|none\b|nil\b|n/?a\b|not\b|nicht|entf|non\b|false\b|0\b|-|nein\b|keine?\b|nein)"
+DECLARES = re.compile(r"(?:dangerous goods|gefahrgut|hazmat|\bdgr\b)\s*[:=][ \t|]*(?=[^\s|])(?!" + _NO + r")"   # table cell 'Dangerous goods: | No'
                       r"|\bUN\s?-?\d{4}\b", re.I)
 NOT_DG = re.compile(r"\b(?:non[- ]?dangerous|not dangerous|no dangerous goods|no dg|non[- ]?dg|no dgr|non[- ]?dgr|no hazmat|"
-                    r"not hazardous|non[- ]?hazardous|kein gefahrgut|nicht gef[aä]hrlich)\b", re.I)
+                    r"not hazardous|non[- ]?hazardous|not restricted|not dgr|kein gefahrgut|nicht gef[aä]hrlich)\b", re.I)
 
 # Inherently dangerous commodities (IATA): named in the RFQ with no UN number and no "Dangerous goods:" line.
 # 5U's trick (21 Nov): the commodity is DG by nature (spray cans = aerosols UN1950) but nothing is declared,
@@ -38,39 +38,47 @@ COMMODITY_DG = re.compile(
     r"lithium[\s-]?(?:ion|metal|batter(?:y|ies)|cells?)|li[\s-]?ion\b|power[\s-]?banks?|"
     r"dry[\s-]?ice|"
     r"gas[\s-]?cylinders?|compressed[\s-]?gas|propane|butane|"
-    r"fireworks?|flares?|"
+    r"fireworks?|feuerwerk\w*|signal[\s-]?flares?|"
     r"flammable[\s-]?(?:liquids?|gas(?:es)?|solids?|aerosols?)|"
     r"nail[\s-]?polish|perfumes?|colognes?|fragrances?|"
-    r"safety[\s-]?matches|lighters?[\s-]?(?:with|refill)?|"
-    r"corrosives?|oxidiz(?:ers?|ing)|radioactive|explosives?)\b", re.I)
+    r"safety[\s-]?matches|cigarette[\s-]?lighters?|lighter[\s-]?(?:gas|fluid|refills?)|"
+    r"corrosive (?:liquids?|substances?|chemicals?)|oxidizers?|radioactive (?:material|sources?)|explosives (?:for|as)|"
+    r"spraydosen?|druckgas\w*|trockeneis)\b", re.I)
 # A confident UN/class for the common ones, keyed by a substring of the match, for a precise description.
 COMMODITY_UN = (
     ("aerosol", ("UN1950", "2.1", "aerosols")), ("spray", ("UN1950", "2.1", "aerosols")),
     ("lithium", ("UN3481", "9", "lithium batteries")), ("li-ion", ("UN3481", "9", "lithium batteries")),
     ("li ion", ("UN3481", "9", "lithium batteries")), ("power bank", ("UN3481", "9", "lithium batteries")),
     ("dry ice", ("UN1845", "9", "dry ice")), ("fireworks", ("UN0336", "1.4", "fireworks")),
+    ("spraydose", ("UN1950", "2.1", "aerosols")), ("akku", ("UN3481", "9", "lithium batteries")),
+    ("batterie", ("UN3481", "9", "lithium batteries")), ("lithium-ionen", ("UN3481", "9", "lithium batteries")),
+    ("trockeneis", ("UN1845", "9", "dry ice")), ("feuerwerk", ("UN0336", "1.4", "fireworks")),
 )
 
 
 # DG by nature, whatever the customer claims. 5U's trap (request 2533, 21 Nov): "maintenance spray cans ... The goods
 # are general cargo, non-dangerous" -> customer declined: "these goods are dangerous goods and you quoted without asking
 # us for the dangerous goods documents". So for these the "non-dangerous" claim must NOT block the DG paragraph (Riky).
-INHERENT_DG = re.compile(r"\b(aerosols?|spray[\s-]?cans?|spray[\s-]?paint|lithium[\s-]?(?:ion|metal|batter(?:y|ies)|cells?)|"
-                         r"li[\s-]?ion\b|power[\s-]?banks?|dry[\s-]?ice|gas[\s-]?cylinders?|compressed[\s-]?gas|"
-                         r"fireworks?)\b", re.I)
+INHERENT_DG = re.compile(r"\b(aerosols?|spray[\s-]?cans?|spray[\s-]?paint|spraydosen?|"
+                         r"lithium[\s-]?(?:ion|metal|batter(?:y|ies)|cells?)|lithium\w*(?:akku|batterie)\w*|lithium-ionen\w*|"
+                         r"li[\s-]?ion\b|li-ion-akku\w*|power[\s-]?banks?|dry[\s-]?ice|trockeneis|gas[\s-]?cylinders?|"
+                         r"compressed[\s-]?gas|druckgas\w*|fireworks?|feuerwerk\w*)", re.I)
 
 
 COMPANY = re.compile(r"\b(?:gmbh|ltd|limited|inc|llc|corp|s\.r\.l|b\.v|media|group|holding)\b|\bag$|& co\b", re.I)   # not 'kg', not 'AG' mid-text
-NEGATED = re.compile(r"\b(?:no|not|without|zero|non|free of|excluding|except)\b(?:\W+\w+){0,2}\W*$", re.I)
+NEGATED = re.compile(r"\b(?:no|not|without|zero|non|free of|excluding|except|kein\w*|ohne)\b[^.;:\n]*$", re.I)   # clause back to sentence start
 FREE_AFTER = re.compile(r"^\s*-?\s*free\b|^[^.\n]{0,25}\b(?:empty|unfilled|dummy|replica|toy)\b", re.I)
+ACCESSORY_BEFORE = re.compile(r"\b(?:empty|caps?|lids?|cases?|covers?|chargers?|packaging|boxes|holders?|bags?|labels?|"
+                              r"stands?|mounts?|for)\s+(?:\w+\s+){0,2}$", re.I)   # 'caps for aerosol cans', 'cases for power banks'
+ACCESSORY_AFTER = re.compile(r"^\s*(?:packaging|labels?|holders?|cases?|caps?|chargers?)\b", re.I)
 
 
 def _cargo_text(text):
     """The mail without its signature block and company lines ('Fireworks Media GmbH' is not cargo)."""
     lines = (text or "").splitlines()
     for i in range(len(lines) - 1, max(-1, len(lines) - 8), -1):        # cut from the closing line downwards
-        if re.fullmatch(r"\s*(?:best|kind|warm|many)?\s*(?:regards|greetings|wishes|thanks|thank you|cheers|"
-                        r"mit freundlichen grüßen|viele grüße|viele gruesse.*|beste grüße|cordiali saluti|saludos)[ ,.!/a-zA-Z]*",
+        if re.fullmatch(r"\s*(?:best|kind|warm|many)?\s*(?:regards|greetings|wishes|thanks|thank you|cheers|danke|"
+                        r"(?:\w+\s+)?(?:grüße|grüßen|gruesse|grüsse|gruß|gruss)|cordiali saluti|saludos|sincerely)[ ,.!/a-zA-Z]*",
                         lines[i], re.I):
             lines = lines[:i]
             break
@@ -80,8 +88,10 @@ def _cargo_text(text):
 def _first_real(rx, text):
     """First match of rx that is not negated ('no lithium batteries'), not '-free' and not 'empty ... bottles'."""
     for m in rx.finditer(text):
-        before, after = text[max(0, m.start() - 40):m.start()], text[m.end():m.end() + 30]
-        if NEGATED.search(before) or FREE_AFTER.search(after):
+        before, after = text[max(0, m.start() - 120):m.start()], text[m.end():m.end() + 30]
+        before = re.split(r"[.!?\n]", before)[-1]          # only this sentence
+        if NEGATED.search(before) or FREE_AFTER.search(after) or ACCESSORY_BEFORE.search(before) \
+                or ACCESSORY_AFTER.search(after) or re.search(r"\(no batter", after, re.I):
             continue
         return m
     return None
@@ -189,7 +199,7 @@ def apply(best, fields, body):
         return best, body, "dangerous goods declared: " + describe(info)
     if mode() == "surcharge":
         extra = surcharge_eur(best)
-        if extra > 0:
+        if extra > 0 and (best.get("total_eur") or best.get("total")):   # no total -> no surcharge, never a crash
             old = _money(best.get("total_eur") or best.get("total"))
             best = dict(best, dg_surcharge_eur=str(extra), total_eur=str(old + extra))
             if best.get("currency", "EUR") == "EUR":

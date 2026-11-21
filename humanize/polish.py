@@ -14,7 +14,15 @@ Never touches a digit of the price, never makes a gateway call, never raises (an
 """
 import datetime, re
 
+<<<<<<< Updated upstream
 CLOSINGS = r"(?:best|bests|ciao|cheers|thanks|thx|regards|(?:kind |best |warm |many )?(?:regards|greetings|wishes|thanks|thank you(?: in advance)?|cheers|grüße|gruesse|grüßen|gruß|gruss|pozdrawiam|pozdrowienia|groeten|saluti|saudações|atenciosamente|hälsningar|mit freundlichen grüßen|viele grüße|best greetings.*|cordiali saluti|saludos|cordialement))"
+=======
+CLOSINGS = (r"(?:best|bests|ciao|cheers|thanks|thx|regards|danke|sincerely|(?:kind |best |warm |many )?(?:regards|greetings|"
+            r"wishes|thanks|thank you(?: in advance)?|cheers)|(?:\w+ ){0,2}(?:grüße|grüßen|gruesse|grüsse|gruß|gruss)|"
+            r"best greetings.*|cordiali saluti|saludos|cordialement)")
+NOT_A_NAME = re.compile(r"gmbh|\bag\b|ltd|inc|medtech|logistics|logistik|audio|sport|team|department|purchasing|shipping|"
+                        r"versand|einkauf|export|sales|office|customer|service|acme|freundliche|liebe|danke", re.I)
+>>>>>>> Stashed changes
 
 
 def signed_name(customer_mail):
@@ -24,8 +32,9 @@ def signed_name(customer_mail):
     for i, line in enumerate(tail):
         if re.fullmatch(CLOSINGS + r"[ ,.!/a-zA-Z]*", line, re.I) and i + 1 < len(tail):
             m = re.match(r"([A-ZÄÖÜ][a-zäöüß]+)(?: [A-ZÄÖÜ][a-zäöüß\-]+)?$", tail[i + 1])
-            if m:
+            if m and not NOT_A_NAME.search(tail[i + 1]):
                 return m.group(1)
+<<<<<<< Updated upstream
     # no closing line we know: a lone "Anna Sonnberg" line first, then a lone "Sara". Two words first, so a closing
     # in a language we do not list ("Pozdrawiam" / "Gruß" above "Katarzyna Nowak") is never taken for the name.
     for pattern in (r"([A-ZÄÖÜ][a-zäöüß]+) [A-ZÄÖÜ][a-zäöüß\-]+", r"([A-ZÄÖÜ][a-zäöüß]+)"):
@@ -34,6 +43,12 @@ def signed_name(customer_mail):
             if m and not re.fullmatch(CLOSINGS + r"[ ,.!]*", line, re.I) and \
                     not re.search(r"gmbh|ag\b|ltd|inc|medtech|logistics|audio|sport|team", line, re.I):
                 return m.group(1)
+=======
+    for line in tail:                                        # no closing line: a lone "Sara" / "Anna Sonnberg" line
+        m = re.fullmatch(r"([A-ZÄÖÜ][a-zäöüß]+)(?: [A-ZÄÖÜ][a-zäöüß\-]+)?", line)
+        if m and not re.fullmatch(CLOSINGS + r"[ ,.!]*", line, re.I) and not NOT_A_NAME.search(line):
+            return m.group(1)
+>>>>>>> Stashed changes
     return None
 
 
@@ -49,7 +64,8 @@ def _dates_near(text, words, before=90, whole_word=True):
         ctx = (text or "")[max(prev_end, m.start() - before):m.start()]   # only words AFTER the previous date
         ctx = re.split(r"[.!?\n]", ctx)[-1]                    # stay inside the sentence
         after = re.split(r"[.!?\n,;]|\b20\d\d-", (text or "")[m.end():m.end() + 25])[0]
-        ctx = ctx + " " + after                              # German puts it after: "am 2026-11-28 abholbereit"
+        if not re.search(r"\b(?:" + DEADLINE_WORDS + r")\b", ctx, re.I):
+            ctx = ctx + " " + after                          # German puts it after: "am 2026-11-28 abholbereit"
         prev_end = m.end()
         if re.search(r"\b(?:" + words + r")" + (r"\b" if whole_word else ""), ctx, re.I):
             try:
@@ -89,7 +105,7 @@ def _day(d, lang):
 def _sentences(body, fields, best, mail, lang):
     low_mail, low_body = (mail or "").lower(), body.lower()
     out = []
-    asks_arrival = re.search(r"\barriv|\beta\b|\bland(?:s|ed|ing)?\b|ankunft|ankommen|eintreff|liefertermin|"
+    asks_arrival = re.search(r"\barriv(?!al\s+(?:airport|port|city|at\s+airport))|\beta\b|\bland(?:s|ed|ing)?\b|ankunft|ankommen|eintreff|liefertermin|"
                              r"\bwann\b[^.?\n]*\ban\b|\bwhen\b[^.?\n]*\b(?:there|delivered)\b", low_mail)
     asks_departure = re.search(r"(?:earliest|next|first|when\b[^.?\n]*)\s*(?:possible\s+)?(?:departure|depart|flight)\b(?!\s+airport)|"
                                r"departure date|abflugdatum|wann\b[^.?\n]*abflug", low_mail)   # not "departure airport"
@@ -127,10 +143,16 @@ def _sentences(body, fields, best, mail, lang):
 
 
 def _insert_before_signoff(body, sentence):
-    m = re.search(r"\n\s*(?:best|kind|warm|many)?\s*(?:regards|wishes|greetings|cheers|thanks|mit freundlichen|"
-                  r"viele grüße|beste grüße|herzliche grüße)\b", body, re.I)
-    if m:
-        return body[:m.start()].rstrip() + "\n\n" + sentence + "\n\n" + body[m.start():].lstrip("\n")
+    """Put the sentence before the closing line ('Best regards', 'Best,', 'Viele Grüße') if one of the last 6 lines is
+    a short closing; else before a short signature block; else at the end. Never above the price paragraph."""
+    lines = body.rstrip().split("\n")
+    for i in range(len(lines) - 1, max(-1, len(lines) - 7), -1):
+        l = lines[i].strip()
+        if len(l) <= 40 and re.fullmatch(r"(?:best|kind|warm|many|with)?\s*(?:regards|wishes|greetings|cheers|thanks|"
+                                         r"best|mit freundlichen grüßen|(?:\w+ )?grüße|(?:\w+ )?gruesse|beste grüße|"
+                                         r"herzliche grüße|cordiali saluti|saludos)\s*[,.!]?", l, re.I):
+            head = "\n".join(lines[:i]).rstrip()
+            return head + "\n\n" + sentence + "\n\n" + "\n".join(lines[i:])
     blocks = body.rstrip().split("\n\n")                    # no closing line: keep the signature block last
     last = blocks[-1].strip().splitlines()
     if len(blocks) > 1 and len(last) <= 3 and not re.search(r"[.!?:]\s*$", blocks[-1].strip()):
@@ -147,7 +169,7 @@ def polish(body, fields=None, best=None, customer_mail=""):
         changes, text = [], body or ""
         lang = "de" if (fields.get("language") or "").startswith("de") else "en"
         name = signed_name(customer_mail)
-        m = re.match(r"(\s*(?:hi|hello|dear|hallo|guten tag)\s+)([^,\n]+)(,)", text, re.I)
+        m = re.match(r"(\s*(?:hi|hello|dear|hallo|guten tag)\s+)([A-Za-zÄÖÜäöüß .'-]{1,40})(,)", text, re.I)   # never eats a price
         if m and name and name not in m.group(2) and not re.search(r"sir|madam|team|damen|herr|frau", m.group(2), re.I):
             text = text[:m.start(2)] + name + text[m.end(2):]
             changes.append("greeting_name")
