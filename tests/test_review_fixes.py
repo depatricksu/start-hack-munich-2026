@@ -37,3 +37,19 @@ class TrackingRoute(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Weights(unittest.TestCase):
+    def test_rounded_piece_weights_are_the_same_total(self):
+        from core.main import shipment
+        self.assertAlmostEqual(shipment({"weight_kg": 500, "pieces": [{"count": 4, "kg_each": 120}]})[0], 500)
+        lots = {"weight_kg": 730, "pieces": [{"count": 4, "kg_each": 48}, {"count": 5, "kg_each": 206}]}
+        self.assertAlmostEqual(shipment(lots)[0], 1952)                     # round 9: real lots still add up
+
+
+class TransitText(unittest.TestCase):
+    def test_text_transit_never_crashes(self):
+        from sourcing.bids import bid_hours, _f
+        self.assertEqual(_f("1-2"), 2.0)
+        self.assertEqual(bid_hours({"hours": None, "transit_days": "1-2"}), 48.0)
+        self.assertIsNone(bid_hours({"hours": None, "transit_days": "soon"}))
