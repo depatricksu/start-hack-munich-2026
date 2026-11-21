@@ -34,14 +34,40 @@ def signed_name(customer_mail):
     return None
 
 
+DATE = r"\b(20\d\d)-(\d\d)-(\d\d)\b"
+READY_WORDS = r"ready|pick ?up|pickup|collect|collection|available|bereit|abhol|abholung|fertig"
+DEADLINE_WORDS = r"arriv\w*|deliver\w*|by|before|latest|no later|deadline|until|spätestens|bis|benötigt|needed|must"
+
+
+def _dates_near(text, words, before=45, whole_word=True):
+    """Dates whose preceding text (same sentence, up to `before` chars) contains one of `words`."""
+    out, prev_end = [], 0
+    for m in re.finditer(DATE, text or ""):
+        ctx = (text or "")[max(prev_end, m.start() - before):m.start()]   # only words AFTER the previous date
+        ctx = re.split(r"[.!?\n]", ctx)[-1]                    # stay inside the sentence
+        after = re.split(r"[.!?\n,;]|\b20\d\d-", (text or "")[m.end():m.end() + 25])[0]
+        ctx = ctx + " " + after                              # German puts it after: "am 2026-11-28 abholbereit"
+        prev_end = m.end()
+        if re.search(r"\b(?:" + words + r")" + (r"\b" if whole_word else ""), ctx, re.I):
+            try:
+                out.append(datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3))))
+            except ValueError:
+                pass
+    return out
+
+
 def _ready_date(text):
-    m = re.search(r"\b(20\d\d)-(\d\d)-(\d\d)\b", text or "")
-    if m:
-        try:
-            return datetime.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
-        except ValueError:
-            return None
-    return None
+    """The date the goods are READY (a date next to ready / pickup / available...). None if unsure: then we say
+    nothing about arrival, a deadline must never be read as the ready date (Kai's review of #24)."""
+    ready = _dates_near(text, READY_WORDS, whole_word=False)   # "abholbereit", "pickup-ready"
+    return ready[0] if ready else None
+
+
+def _deadline(text):
+    """An arrival deadline the customer states ('must arrive by 2026-11-24'), or None."""
+    ready = set(_dates_near(text, READY_WORDS, whole_word=False))
+    dl = [d for d in _dates_near(text, DEADLINE_WORDS) if d not in ready]
+    return min(dl) if dl else None
 
 
 def _city(text, code):
@@ -51,31 +77,38 @@ def _city(text, code):
 
 
 def _day(d, lang):
-    if lang == "de":
-        return d.strftime("%d.%m.")
+    if lang == "de":                                         # "28. November": no "28.11." that looks like an amount
+        return "%d. %s" % (d.day, ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September",
+                                   "Oktober", "November", "Dezember"][d.month - 1])
     return d.strftime("%a %-d %b")
 
 
 def _sentences(body, fields, best, mail, lang):
     low_mail, low_body = (mail or "").lower(), body.lower()
     out = []
-    asks_arrival = re.search(r"\barriv|\beta\b|\bland(?:s|ed|ing)?\b|ankunft|ankommen|\bwhen\b[^.?\n]*\b(?:there|delivered)\b",
-                             low_mail)
+    asks_arrival = re.search(r"\barriv|\beta\b|\bland(?:s|ed|ing)?\b|ankunft|ankommen|eintreff|liefertermin|"
+                             r"\bwann\b[^.?\n]*\ban\b|\bwhen\b[^.?\n]*\b(?:there|delivered)\b", low_mail)
     asks_departure = re.search(r"departure|abflug|depart", low_mail)
     has_date = (re.search(r"\b\d{1,2}(?:\.\d{1,2}\.| (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec))\b", body)
                 or re.search(r"\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|mon|tue|wed|thu|fri)\b", body, re.I)
                 or re.search(r"\b20\d\d-\d\d-\d\d\b", body))
     days = best.get("transit_days") if isinstance(best, dict) else None
     if (asks_arrival or asks_departure) and not has_date and days:
-        ready = _ready_date(mail) or datetime.date.today()
-        arrive = ready + datetime.timedelta(days=int(round(float(days))))
-        city = _city(mail, fields.get("destination"))
-        if lang == "de":
-            out.append(f"Wenn die Ware am {_day(ready, lang)} bereitsteht, fliegt sie direkt danach ab und ist "
-                       f"voraussichtlich am {_day(arrive, lang)} in {city}.")
-        else:
-            out.append(f"If it's ready on {_day(ready, lang)}, it can fly right away and should arrive in {city} "
-                       f"around {_day(arrive, lang)}.")
+        ready = _ready_date(mail)
+        if ready:
+            arrive = ready + datetime.timedelta(days=int(round(float(days))))
+            deadline = _deadline(mail)
+            city = _city(mail, fields.get("destination"))
+            if deadline and arrive > deadline:
+                pass                                         # we would miss their deadline: promise nothing
+            elif lang == "de":
+                when = f", also vor Ihrem Termin am {_day(deadline, lang)}" if deadline else ""
+                out.append(f"Wenn die Ware am {_day(ready, lang)} bereitsteht, kann sie kurz danach abfliegen und "
+                           f"wäre voraussichtlich um den {_day(arrive, lang)} in {city}{when}.")
+            else:
+                when = f", ahead of your {_day(deadline, lang)} deadline" if deadline else ""
+                out.append(f"With the goods ready on {_day(ready, lang)}, it should depart soon after and arrive in "
+                           f"{city} around {_day(arrive, lang)}{when}.")
     if re.search(r"insur|versicher", low_mail) and not re.search(r"insur|versicher", low_body):
         out.append("Die Transportversicherung ist im Preis nicht enthalten, die ergänzen wir gern." if lang == "de" else
                    "Cargo insurance isn't included in this price; happy to add it if you need it.")
@@ -94,6 +127,10 @@ def _insert_before_signoff(body, sentence):
                   r"viele grüße|beste grüße|herzliche grüße)\b", body, re.I)
     if m:
         return body[:m.start()].rstrip() + "\n\n" + sentence + "\n\n" + body[m.start():].lstrip("\n")
+    blocks = body.rstrip().split("\n\n")                    # no closing line: keep the signature block last
+    last = blocks[-1].strip().splitlines()
+    if len(blocks) > 1 and len(last) <= 3 and not re.search(r"[.!?:]\s*$", blocks[-1].strip()):
+        return "\n\n".join(blocks[:-1]) + "\n\n" + sentence + "\n\n" + blocks[-1].strip()
     return body.rstrip() + "\n\n" + sentence
 
 

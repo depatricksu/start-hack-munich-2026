@@ -42,3 +42,35 @@ class Polish(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Dates(unittest.TestCase):
+    """Kai's review of #24: a deadline must never be read as the ready date."""
+    REPLY = "Hi Tom,\n\nTotal 900.00 EUR, transit 5 days.\n\nBest regards\nLena"
+
+    def test_deadline_only_says_nothing(self):
+        mail = "It MUST arrive by 2026-11-24. When will it arrive?\n\nBest\nTom"
+        body, _ = humanize.polish(self.REPLY, {}, {"transit_days": 5}, mail)
+        self.assertNotIn("Nov", body)
+
+    def test_ready_date_wins_over_deadline(self):
+        mail = "Arrival needed before 2026-11-30, goods ready 2026-11-25. When will it arrive?\n\nBest\nTom"
+        body, _ = humanize.polish(self.REPLY, {}, {"transit_days": 3}, mail)
+        self.assertIn("ready on Wed 25 Nov", body)
+        self.assertIn("around Sat 28 Nov, ahead of your Mon 30 Nov deadline", body)
+
+    def test_we_would_miss_the_deadline(self):
+        mail = "Goods ready 2026-11-25, must arrive by 2026-11-27. Earliest arrival?\n\nBest\nTom"
+        body, _ = humanize.polish(self.REPLY, {}, {"transit_days": 5}, mail)
+        self.assertNotIn("arrive in", body)
+
+
+class Layout(unittest.TestCase):
+    def test_german_date_words_and_sentence_before_signature(self):
+        mail = "Bitte um Angebot, die Ware ist am 2026-11-28 abholbereit. Wann kommt sie an?\n\nViele Grüße\nDeniz Yilmaz"
+        reply = "Guten Tag Deniz Yilmaz,\n\nPreis 1599.41 EUR, 3 Tage.\n\nLena Hofmann\nLuftfracht Export"
+        body, _ = humanize.polish(reply, {"language": "de", "destination": "ORD"}, {"transit_days": 3}, mail)
+        self.assertIn("28. November", body)
+        self.assertNotIn("28.11.", body)
+        self.assertTrue(body.rstrip().endswith("Lena Hofmann\nLuftfracht Export"))
+        self.assertEqual(re.findall(r"\d+\.\d\d", body), ["1599.41"])
