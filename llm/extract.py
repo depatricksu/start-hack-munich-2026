@@ -327,10 +327,11 @@ def final_reply(template, best, fields, customer="", thread_id=0):
         plain = _fill("", best, fields, customer, thread_id, lang)
     try:                                                     # personal touch (llm/human.py): any error -> plain mail
         style = human.choose(fields, lang, thread_id)
-        body = human.apply(plain, style, fields, lang)
         if HUMAN_VOICE and fields.get("personal_cues") and human.HUMAN_STYLE not in human.STYLES:
             # they wrote something personal: answering THAT is the touch, and no second line on top of it
             body, style = human.mirror(plain, fields["personal_cues"], lang, thread_id), "mirror"
+        else:                                                # (apply only here: it uses up a line in human.fresh)
+            body = human.apply(plain, style, fields, lang, thread_id=thread_id)
         if body != plain and quality.check(body, lang, best, fields, customer, SIGNER, names):
             body, style = plain, "control"                   # the touch must never cost us a clean mail
         fields["human_style"] = style

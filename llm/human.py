@@ -86,7 +86,9 @@ CITY_LINE = {   # remarks, not greetings: the sign-off below already says "regar
     "Bonn": {"en": "Freight with good timing, as Beethoven's hometown would expect.",
              "de": "Ein Versand mit Taktgefühl, wie sich das für die Beethovenstadt gehört."},
 }
-CITY_GENERIC = {"en": "Always good to get a request from {CITY}.", "de": "Schön, eine Anfrage aus {CITY} zu bekommen."}
+CITY_GENERIC = {"en": ("Always good to get a request from {CITY}.", "Nice to hear from {CITY} again.",
+                       "Good to have something from {CITY} on my desk."),
+                "de": ("Schön, eine Anfrage aus {CITY} zu bekommen.", "Schön, wieder von Ihnen aus {CITY} zu hören.")}
 
 DEST_NICK = {
     "JFK": ("the Big Apple", "den Big Apple"), "LAX": ("the City of Angels", "die Stadt der Engel"),
@@ -107,7 +109,8 @@ DEST_NICK = {
     "MNL": ("Manila", "Manila"), "SGN": ("Saigon", "Saigon"), "TLV": ("Tel Aviv", "Tel Aviv"), "RUH": ("Riyadh", "Riad"),
     "ASU": ("Asunción", "Asunción"),
 }
-DEST_LINE = {"en": "Next stop for your cargo: {NICK}.", "de": "Nächster Halt für Ihre Ware: {NICK}."}
+DEST_LINE = {"en": ("Next stop for your cargo: {NICK}.", "Off to {NICK} it goes.", "{NICK} it is, then."),
+             "de": ("Nächster Halt für Ihre Ware: {NICK}.", "Dann also auf nach {NICK}.")}
 
 
 def _berlin(ts):
@@ -120,25 +123,32 @@ def _berlin(ts):
     return utc + timedelta(hours=2 if summer else 1)
 
 
-def moment_line(ts, lang):
+def moment_lines(ts, lang):
+    """Ways to say when they wrote, best first."""
     t = _berlin(ts or time.time())
     wd, h = t.weekday(), t.hour
     if 0 <= h < 6:
-        return {"en": "Late one tonight, glad we could turn it around straight away.",
-                "de": "Späte Stunde, umso schöner, dass es gleich klappt."}[lang]
+        return {"en": ("Late one tonight, glad we could turn it around straight away.", "A late one, so here it is right away."),
+                "de": ("Späte Stunde, umso schöner, dass es gleich klappt.",)}[lang]
     if wd == 6:
-        return {"en": "Sunday or not, your request didn't have to wait.",
-                "de": "Sonntag hin oder her, Ihre Anfrage musste nicht warten."}[lang]
+        return {"en": ("Sunday or not, your request didn't have to wait.", "Happy to help, even on a Sunday."),
+                "de": ("Sonntag hin oder her, Ihre Anfrage musste nicht warten.", "Gern geschehen, auch am Sonntag.")}[lang]
     if wd == 5 and h >= 17:
-        return {"en": "Saturday evening, but your request didn't have to wait.",
-                "de": "Samstagabend, aber Ihre Anfrage musste trotzdem nicht warten."}[lang]
+        return {"en": ("Saturday evening, but your request didn't have to wait.", "Enjoy the rest of your Saturday evening.",
+                       "Happy to help, even on a Saturday night."),
+                "de": ("Samstagabend, aber Ihre Anfrage musste trotzdem nicht warten.", "Einen schönen Samstagabend noch.")}[lang]
     if h >= 20:
-        return {"en": "Working late too, I see. This one was quick to sort.",
-                "de": "Auch noch spät dran, wie ich sehe. Das hier ging zum Glück schnell."}[lang]
+        return {"en": ("Working late too, I see. This one was quick to sort.", "Enjoy the rest of your evening."),
+                "de": ("Auch noch spät dran, wie ich sehe. Das hier ging zum Glück schnell.", "Einen schönen Abend noch.")}[lang]
     if h < 10:
-        return {"en": "A good start to the day, this one was quick to sort.",
-                "de": "Guter Start in den Tag, das ging schnell."}[lang]
-    return {"en": "That one was quick to sort.", "de": "Das ging zum Glück schnell."}[lang]
+        return {"en": ("A good start to the day, this one was quick to sort.", "Have a good start to the day."),
+                "de": ("Guter Start in den Tag, das ging schnell.", "Einen guten Start in den Tag.")}[lang]
+    return {"en": ("That one was quick to sort.", "Have a good rest of the day."),
+            "de": ("Das ging zum Glück schnell.", "Einen schönen Tag noch.")}[lang]
+
+
+def moment_line(ts, lang):
+    return moment_lines(ts, lang)[0]
 
 
 def local_greeting(hello, city, lang):
@@ -155,37 +165,58 @@ def local_greeting(hello, city, lang):
     return hello
 
 
-def city_line(city, lang):
+def _cap(line):
+    return line[:1].upper() + line[1:]
+
+
+def _first(options):
+    return options[0] if options else ""
+
+
+def city_lines(city, lang):
     if not city:
-        return ""
-    line = CITY_LINE.get(city, {}).get(lang) or CITY_GENERIC[lang]
-    return line.replace("{CITY}", _local(city, lang))
+        return ()
+    own = CITY_LINE.get(city, {}).get(lang)
+    return (own,) if own else tuple(l.replace("{CITY}", _local(city, lang)) for l in CITY_GENERIC[lang])
+
+
+def city_line(city, lang):
+    return _first(city_lines(city, lang))
+
+
+def dest_lines(fields, lang):
+    nick = DEST_NICK.get((fields.get("destination") or "").upper())
+    if not nick:
+        return ()
+    n = nick[1 if lang == "de" else 0]
+    return tuple(_cap(l.replace("{NICK}", n)) for l in DEST_LINE[lang])
 
 
 def dest_line(fields, lang):
-    nick = DEST_NICK.get((fields.get("destination") or "").upper())
-    return DEST_LINE[lang].replace("{NICK}", nick[1 if lang == "de" else 0]) if nick else ""
+    return _first(dest_lines(fields, lang))
 
 
-def touch(style, fields, lang, received_at=None):
-    """-> (greeting_fn or None, line). greeting_fn(hello) swaps the greeting; line goes above the sign-off."""
+def touch(style, fields, lang, received_at=None, choose=_first):
+    """-> (greeting_fn or None, line). greeting_fn(hello) swaps the greeting; line goes above the sign-off.
+    `choose` picks one of the ways to say it: the first by default (no side effect), apply() passes fresh()."""
     if lang not in ("en", "de") or style == "control":
         return None, ""
     city = customer_city(fields)
     if style == "city":
-        return None, city_line(city, lang)
+        return None, choose(city_lines(city, lang))
     if style == "destination":
-        return None, dest_line(fields, lang)
+        return None, choose(dest_lines(fields, lang))
     if style == "moment":
-        return None, moment_line(received_at, lang)
+        return None, choose(moment_lines(received_at, lang))
     if style == "local":
-        return (lambda h: local_greeting(h, city, lang)), city_line(city, lang)
+        return (lambda h: local_greeting(h, city, lang)), choose(city_lines(city, lang))
     return None, ""
 
 
-def apply(body, style, fields, lang, received_at=None):
-    """Put the touch into a finished body (greeting is line 0, our signature the last 4 lines incl. the blank one)."""
-    swap, line = touch(style, fields, lang, received_at)
+def apply(body, style, fields, lang, received_at=None, thread_id=0):
+    """Put the touch into a finished body (greeting is line 0, our signature the last 4 lines incl. the blank one).
+    The line is one the jury has not seen from us in the last RECENT_N quotes, if there is one."""
+    swap, line = touch(style, fields, lang, received_at, choose=lambda o: fresh(o, thread_id, "touch-" + style))
     if not swap and not line:
         return body
     lines = body.split("\n")
@@ -221,13 +252,25 @@ _WELL = {
                       r"|you(?:['’]re| are) (?:doing )?well|all is well)", re.I),
            ("All good here, thanks, I hope your {N} is going well too.",
             "Thanks, the {N} is going well here, and I hope yours is too.",
-            "My {N} is going fine, thanks for asking, and I hope yours is as well."),
-           ("All good here, thanks, I hope the same goes for you.", "Doing well, thanks for asking, I hope you are too.")),
+            "My {N} is going fine, thanks for asking, and I hope yours is as well.",
+            "Thanks, a busy {N} here, but a good one. I hope yours is too.",
+            "Kind of you to ask, the {N} has been good so far.",
+            "Thanks for asking, it's been a good {N} here.",
+            "Thank you, busy but good here this {N}.",
+            "Thanks, can't complain about the {N} so far."),
+           ("All good here, thanks, I hope the same goes for you.", "Doing well, thanks for asking, I hope you are too.",
+            "Thanks for asking, all well on our side.", "Kind of you to ask, all good here.",
+            "Thanks, busy but good here.")),
     "de": (re.compile(r"hoffe,? (?:es geht ihnen gut|sie hatten ein(?:en)? (?:schönes|gutes|guten|erholsames) (wochenende|start in die woche))|"
                       r"hoffe,? (?:bei ihnen ist alles (?:gut|in ordnung))", re.I),
-           ("danke der Nachfrage, hier ist alles bestens, ich hoffe, bei Ihnen auch.",),
            ("danke der Nachfrage, hier ist alles bestens, ich hoffe, bei Ihnen auch.",
-            "vielen Dank, hier läuft alles gut, ich hoffe, bei Ihnen ebenso.")),
+            "vielen Dank, hier läuft alles gut, ich hoffe, bei Ihnen ebenso.",
+            "danke, bei uns ist viel los, aber alles gut.",
+            "danke der Nachfrage, uns geht es gut."),
+           ("danke der Nachfrage, hier ist alles bestens, ich hoffe, bei Ihnen auch.",
+            "vielen Dank, hier läuft alles gut, ich hoffe, bei Ihnen ebenso.",
+            "danke, bei uns ist viel los, aber alles gut.",
+            "danke der Nachfrage, uns geht es gut.")),
     "it": (re.compile(r"spero (?:che )?(?:stiate|stia|vada|tutto) (?:tutto )?bene", re.I), (),
            ("Qui tutto bene, grazie, spero anche da voi.",)),
     "fr": (re.compile(r"j['’]espère que (?:vous allez bien|tout va bien)", re.I), (),
@@ -237,7 +280,8 @@ _WELL = {
 }
 _RUSH = {
     "en": (re.compile(r"(?:sorry|apologies) for the (rush|short notice|late (?:request|notice))", re.I),
-           ("No worries about the {N}.", "No problem at all on the {N}.")),
+           ("No worries about the {N}.", "No problem at all on the {N}.", "The {N} is no problem at all.",
+            "Don't worry about the {N}, that's what we're here for.")),
     "de": (re.compile(r"entschuldigen sie (?:bitte )?die (eile|kurzfristige anfrage|kurzfristigkeit)", re.I),
            ("kein Problem, dafür sind wir da.",)),
 }
@@ -253,8 +297,11 @@ _WISH = {
 }
 # greetings from their town -> our sign-off line goes back there
 _FROM = {
-    "en": (re.compile(r"\b(?:greetings|regards|wishes) from " + _TOWN), ("Best regards to {T}", "Greetings back to {T}", "Kind regards to {T}")),
-    "de": (re.compile(r"\b[Gg]r(?:ü|ue)(?:ß|ss)en? aus " + _TOWN), ("Viele Grüße zurück nach {T}", "Beste Grüße nach {T}")),
+    "en": (re.compile(r"\b(?:greetings|regards|wishes) from " + _TOWN), ("Best regards to {T}", "Greetings back to {T}",
+                                                                          "Kind regards to {T}", "Warm regards to {T}",
+                                                                          "Best wishes to {T}")),
+    "de": (re.compile(r"\b[Gg]r(?:ü|ue)(?:ß|ss)en? aus " + _TOWN), ("Viele Grüße zurück nach {T}", "Beste Grüße nach {T}",
+                                                                      "Herzliche Grüße nach {T}")),
     "it": (re.compile(r"\b[Ss]alut[io] da " + _TOWN), ("Un caro saluto a {T}",)),
 }
 _NOT_A_TOWN = {"The", "Our", "All", "Us", "Me", "Germany", "Deutschland", "Der", "Dem", "Uns"}
@@ -314,6 +361,48 @@ def _pick(options, thread_id, salt):
     return options[mix(salt, thread_id) % len(options)]
 
 
+# The jury reads every round's accepted mails side by side, round after round. A line it has already seen from the
+# same (hidden) team reads as a template, so a line used in the last RECENT_N quotes is not used again (#human-variety).
+# Before this, 4 of our last 25 quotes opened with the same "All good here, thanks, I hope your week is going well
+# too." and our human wins stopped after round 38.
+RECENT_N = int(os.environ.get("HUMAN_RECENT_N", "12"))
+_recent = []                                              # newest last; persisted in STATE by the live clerk
+
+
+def _seen():
+    if _learning_on() and not _recent:
+        with _lock:
+            _recent.extend(_load().get("recent", [])[-RECENT_N:])
+    return _recent
+
+
+def _remember(line):
+    if not line:
+        return
+    _recent.append(line)
+    del _recent[:-RECENT_N]
+    if _learning_on():
+        with _lock:
+            s = _load()
+            s["recent"] = list(_recent)
+            _save(s)
+
+
+def fresh(options, thread_id, salt, fmt=lambda s: s):
+    """Like _pick, but skips a line used in the last RECENT_N quotes. All used -> the one used longest ago.
+    The chosen line is remembered. `fmt` fills the placeholders, so 'week' and 'day' count as different lines."""
+    if not options:
+        return ""
+    seen = _seen()
+    start = mix(salt, thread_id) % len(options)
+    ordered = [fmt(options[(start + i) % len(options)]) for i in range(len(options))]
+    pick = next((o for o in ordered if o not in seen), None)
+    if pick is None:
+        pick = min(ordered, key=lambda o: max(i for i, s in enumerate(seen) if s == o))
+    _remember(pick)
+    return pick
+
+
 def mirror(body, found, lang, thread_id=0):
     """Put our answers to their personal lines into a finished body (greeting is line 0, our 3 signature lines last).
     A line the model already wrote itself is not doubled."""
@@ -327,9 +416,12 @@ def mirror(body, found, lang, thread_id=0):
     first = None
     if "well" in found and lang in _WELL and not re.search(r"\b(hope|hoffe|spero|espère|espero)\b", text):
         named, plain = _WELL[lang][1], _WELL[lang][2]
-        first = _pick(named, thread_id, "well").replace("{N}", found["well"]) if found["well"] and named else _pick(plain, thread_id, "well")
+        if found["well"] and named:
+            first = fresh(named, thread_id, "well", lambda s: s.replace("{N}", found["well"]))
+        else:
+            first = fresh(plain, thread_id, "well")
     elif "rush" in found and lang in _RUSH and not re.search(r"\b(no worries|no problem|kein problem)\b", text):
-        first = _pick(_RUSH[lang][1], thread_id, "rush").replace("{N}", found["rush"])
+        first = fresh(_RUSH[lang][1], thread_id, "rush", lambda s: s.replace("{N}", found["rush"]))
     if first and len(head) > 2:
         rest = head[2]
         head[2] = first + " " + rest[:1].upper() + rest[1:]
@@ -340,7 +432,7 @@ def mirror(body, found, lang, thread_id=0):
         line = _WISH[lang][1].replace("{W}", words)
         head += ["", line[:1].upper() + line[1:] + mark]
     if "town" in found and lang in _FROM:
-        sign[1] = _pick(_FROM[lang][1], thread_id, "town").replace("{T}", found["town"])
+        sign[1] = fresh(_FROM[lang][1], thread_id, "town", lambda s: s.replace("{T}", found["town"]))
     elif found.get("cheers") and lang == "en":
         sign[1] = "Cheers"
     return "\n".join(head + sign)

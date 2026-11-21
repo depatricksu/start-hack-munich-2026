@@ -151,7 +151,7 @@ class Mirror(Base):
         cases = {
             "de": ("Guten Tag,\n\nich hoffe, es geht Ihnen gut. Bitte um Ihr Angebot für 300 kg nach New York.\n\nIhnen noch einen "
                    "schönen Tag!\n\nMit freundlichen Grüßen aus Esslingen\nKatharina Brandt\nBrandt Präzision GmbH",
-                   ("ich hoffe, bei Ihnen", "Ihnen auch einen schönen Tag!", "nach Esslingen")),
+                   (tuple(human._WELL["de"][2]), "Ihnen auch einen schönen Tag!", "nach Esslingen")),
             "it": ("Buongiorno,\n\nabbiamo bisogno di una quotazione per 300 kg da Monaco a New York, grazie.\n\nGrazie mille e "
                    "buona giornata!\n\nGiulia Ferrari\nFerrari Tessuti", ("Buona giornata anche a voi!",)),
             "fr": ("Bonjour,\n\nj'espère que vous allez bien. Nous avons besoin d'un devis pour 300 kg de Munich à New York.\n\n"
@@ -163,8 +163,9 @@ class Mirror(Base):
             f = fields_for(mail, "kunde-firma@hackloop.mail", lg, origin="MUC", destination="JFK")
             body, why = llm.final_reply("", BEST, f, "kunde-firma@hackloop.mail", 11)
             self.assertEqual(why, [], body)
-            for text in expected:
-                self.assertIn(text, body, lg)
+            for text in expected:                        # a tuple: any one of these ways to say it
+                options = text if isinstance(text, tuple) else (text,)
+                self.assertTrue(any(o in body for o in options), (lg, options, body))
             self.assertEqual(quality.check(body, lg, BEST, f, "kunde-firma@hackloop.mail", llm.SIGNER), [], body)
             self.assertIn(langmod.detect(body), (lg, None), body)
 
