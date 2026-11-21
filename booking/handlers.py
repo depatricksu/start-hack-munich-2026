@@ -250,14 +250,15 @@ def book_portal(tid, chosen, fields):
 
 
 def request_by_mail(tid, chosen, fields):
-    """Sheet airlines have no rate_id: send the airline a booking request."""
+    """Book by mail: a sheet airline (no rate_id), or a portal airline whose booking the portal refuses (503)."""
     to = AIRLINE_EMAIL.get((chosen["airline"] or "").lower())
     if not to:
         return False
+    rate = "portal rate ID %s" % chosen["rate_id"] if chosen.get("rate_id") else "your tariff"
     body = ("Hello,\n\nplease book the following air export shipment.\n\n"
-            "Our reference: {ref}\nRoute: {o} - {d}\nWeight: {w} kg, volume {v} cbm\nRate: your tariff, all-in {p} {c}\n\n"
+            "Our reference: {ref}\nRoute: {o} - {d}\nWeight: {w} kg, volume {v} cbm\nRate: {rate}, all-in {p} {c}\n\n"
             "Please confirm with your booking reference.\n\nBest regards\nYour forwarding team").format(
-        ref=crm.team_reference(tid), o=chosen["origin"], d=chosen["destination"],
+        ref=crm.team_reference(tid), o=chosen["origin"], d=chosen["destination"], rate=rate,
         w=fields.get("weight_kg_total"), v=fields.get("volume_cbm_total"), p=chosen["total"], c=chosen["currency"])
     return mailbox.send(to, "Booking request %s %s-%s" % (crm.team_reference(tid), chosen["origin"], chosen["destination"]),
                         body, thread_id=tid)
@@ -395,13 +396,23 @@ def handle_follow_up(mail):
 
     if chosen.get("rate_id"):
         result, r = book_portal(tid, chosen, fields)
-        if result != "booked":
+        # 5U 21:00 (request 13471): the portal refuses bookings for some airlines with 503 "Please book by email".
+        # That is the sheet-airline path: mail the airline, tell the customer, wait for the airline's confirmation.
+        by_mail = (result != "booked" and str(r).startswith("portal booking down")
+                   and request_by_mail(tid, chosen, fields))
+        if by_mail:
+            db.event("portal_booking_down_mail", tid, mail["id"], airline=chosen["airline"])
+            crm.upsert(tid, status="requested", raw={"reason": r}, **base)
+            db.update_session(tid, status="booking_requested")
+            kind = "requested"
+        elif result != "booked":
             crm.upsert(tid, status="failed", raw={"reason": r}, **base)
             return _needs_human(tid, mail["id"], r)
-        crm.upsert(tid, status="booked", booking_reference=r["booking_reference"], booked_at=time.time(),
-                   raw=r, **dict(base, rate_id=r.get("rate_id") or base["rate_id"]))
-        db.update_session(tid, status="booked")
-        kind = "booked"
+        else:
+            crm.upsert(tid, status="booked", booking_reference=r["booking_reference"], booked_at=time.time(),
+                       raw=r, **dict(base, rate_id=r.get("rate_id") or base["rate_id"]))
+            db.update_session(tid, status="booked")
+            kind = "booked"
     else:
         if not request_by_mail(tid, chosen, fields):
             crm.upsert(tid, status="failed", **base)
