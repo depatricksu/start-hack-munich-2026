@@ -71,5 +71,43 @@ class TestForeignLanguage(unittest.TestCase):
         self.assertEqual(body.count(llm.SIGNER), 1)              # one signature, not two
 
 
+class TestRound2(unittest.TestCase):
+    """Red-team round 2 (21 Nov ~19:20): more raw units, EXW, customer replies."""
+    def test_tonnes(self):
+        f = {"weight_kg": 2.4}
+        llm.fix_units(f, {"subject": "", "body": "6 crates, total 2.4 t, 9.8 cbm"})
+        self.assertEqual(f["weight_kg"], 2400)
+
+    def test_millimetres(self):
+        f = {"weight_kg": 780, "pieces": [{"count": 3, "l_cm": 1200, "w_cm": 800, "h_cm": 1100, "kg_each": None}]}
+        llm.fix_units(f, {"subject": "", "body": "3 Paletten, je 1200 x 800 x 1100 mm, gesamt 780 kg"})
+        self.assertEqual((f["pieces"][0]["l_cm"], f["pieces"][0]["w_cm"], f["pieces"][0]["h_cm"]), (120, 80, 110))
+
+    def test_net_becomes_gross(self):
+        f = {"weight_kg": 640}
+        llm.fix_units(f, {"subject": "", "body": "8 drums, net weight 640 kg, gross weight 712 kg, 2.1 cbm"})
+        self.assertEqual(f["weight_kg"], 712)
+        f = {"weight_kg": 712}
+        self.assertEqual(llm.fix_units(f, {"subject": "", "body": "net weight 640 kg, gross weight 712 kg"}), [])
+
+    def test_exw_means_door_pickup(self):
+        mail = {"subject": "Quotation EXW Stuttgart - ORD", "body": "Incoterm EXW Brandt GmbH, Industriestr. 12, 70565 Stuttgart, "
+                "to ORD. Tel +49 711 12345."}
+        f = {"origin": "STR"}
+        self.assertEqual(llm.fix_incoterm(f, mail), "70565")
+        self.assertEqual(f["pickup_postcode"], "70565")
+        self.assertIsNone(llm.fix_incoterm({"origin": "FRA"}, {"subject": "", "body": "FCA Frankfurt airport, 60549"}))
+
+    def test_customer_replies(self):
+        from booking.handlers import classify
+        for text in ("Perfect, thank you. Please proceed with the booking.", "OK for us. Please arrange.",
+                     "Yes, that works for us.", "Alles klar, machen wir so.", "Va bene, procedete pure."):
+            self.assertEqual(classify(text), "accept", text)
+        self.assertEqual(classify("Can you do any better on the price?"), "better_price")
+        self.assertEqual(classify("Thanks, but we won't proceed."), "decline")
+        self.assertEqual(classify("Please book, but only after we confirm the pickup date on Monday."), "unclear")
+        self.assertEqual(classify("Yes, but please send the invoice in USD."), "unclear")
+
+
 if __name__ == "__main__":
     unittest.main()

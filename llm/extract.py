@@ -374,6 +374,11 @@ def _fill_places(fields, mail):
 
 
 _LB = re.compile(r"(\d[\d,.]*)\s*(?:lbs?|pounds?)\b", re.I)
+_TONNES = re.compile(r"(\d[\d,.]*)\s*(?:t|tons?|tonnes?|tonnen)\b", re.I)
+_MM = re.compile(r"(\d+(?:[.,]\d+)?)\s*[x\u00d7*]\s*(\d+(?:[.,]\d+)?)\s*[x\u00d7*]\s*(\d+(?:[.,]\d+)?)\s*mm\b", re.I)
+_NET = re.compile(r"\bnet(?:to)?(?:\s*weight|gewicht)?\s*[:=]?\s*(\d[\d,.]*)\s*kgs?\b|(\d[\d,.]*)\s*kgs?\s*net(?:to)?\b", re.I)
+_GROSS = re.compile(r"\b(?:gross|brutto)(?:\s*weight|gewicht)?\s*[:=]?\s*(\d[\d,.]*)\s*kgs?\b|(\d[\d,.]*)\s*kgs?\s*(?:gross|brutto)\b", re.I)
+_EXW = re.compile(r"\b(?:EXW|ex[ -]works|ab werk)\b", re.I)
 _INCHES = re.compile(r"(\d+(?:\.\d+)?)\s*[x\u00d7*]\s*(\d+(?:\.\d+)?)\s*[x\u00d7*]\s*(\d+(?:\.\d+)?)\s*"
                      r"(?:in\b|inch(?:es)?\b|\"|'')", re.I)
 
@@ -398,14 +403,40 @@ def fix_units(fields, mail):
         except ValueError:
             pass
     dims = [tuple(float(m.group(i)) for i in (1, 2, 3)) for m in _INCHES.finditer(text)]
-    if not lbs and not dims:
+    tonnes = []
+    for m in _TONNES.finditer(text):
+        try:
+            n = _num(m.group(1).rstrip(".,"))
+        except ValueError:
+            continue
+        if 0 < n < 200:                                  # "2.4 t"; a 5-digit number before "t" is no tonnage
+            tonnes.append(n)
+    mm = [tuple(float(m.group(i).replace(",", ".")) for i in (1, 2, 3)) for m in _MM.finditer(text)]
+    nums = lambda rx: {_num(a or b) for a, b in (m.groups() for m in rx.finditer(text))}   # noqa: E731
+    try:
+        net, gross = nums(_NET), nums(_GROSS)
+    except ValueError:
+        net, gross = set(), set()
+    if not (lbs or dims or tonnes or mm or (net and len(gross) == 1)):
         return []
     fixed = []
     for f in [fields] + list(fields.get("shipments") or []):
         if any(_same(f.get("weight_kg"), n) for n in lbs):
             fixed.append("weight_kg %s lb" % f["weight_kg"])
             f["weight_kg"] = round(float(f["weight_kg"]) * 0.45359237, 1)
+        if any(_same(f.get("weight_kg"), n) for n in tonnes):
+            fixed.append("weight_kg %s t" % f["weight_kg"])
+            f["weight_kg"] = round(float(f["weight_kg"]) * 1000, 1)
+        if f is fields and len(gross) == 1 and any(_same(f.get("weight_kg"), n) for n in net):
+            g = next(iter(gross))                        # "net 640 kg, gross 712 kg": air freight bills the gross
+            if not _same(g, f["weight_kg"]):
+                fixed.append("weight_kg net %s -> gross %s" % (f["weight_kg"], g))
+                f["weight_kg"] = g
         for p in f.get("pieces") or []:
+            got = (p.get("l_cm"), p.get("w_cm"), p.get("h_cm"))
+            if all(got) and any(all(_same(g, d) for g, d in zip(got, dim)) for dim in mm):
+                fixed.append("dims %sx%sx%s mm" % got)
+                p["l_cm"], p["w_cm"], p["h_cm"] = (round(float(x) / 10, 1) for x in got)
             if any(_same(p.get("kg_each"), n) for n in lbs):
                 fixed.append("kg_each %s lb" % p["kg_each"])
                 p["kg_each"] = round(float(p["kg_each"]) * 0.45359237, 1)
@@ -417,6 +448,24 @@ def fix_units(fields, mail):
         fields.setdefault("filled_by_code", []).append("units")
         fields["unit_fix"] = fixed
     return fixed
+
+
+def fix_incoterm(fields, mail):
+    """'Incoterm EXW, our factory 70565 Stuttgart': ex works means WE collect at their door, even when the mail never
+    says pickup or truck. The model then leaves pickup_postcode empty and we quote airport to airport without the truck
+    leg (red-team round 2). Code takes the first German postcode of a known pickup zone from the mail."""
+    if fields.get("pickup_postcode") or len(fields.get("shipments") or []) > 1:
+        return None
+    text = "%s\n%s" % (mail.get("subject") or "", mail.get("body") or "")
+    if not _EXW.search(text):
+        return None
+    from shared.rfq import PICKUP_ZONES
+    for m in re.finditer(r"(?<![\d+/-])(?:D-)?(\d{5})\b(?![\d/-])", text):
+        if m.group(1)[:2] in PICKUP_ZONES:
+            fields["pickup_postcode"] = m.group(1)
+            fields.setdefault("filled_by_code", []).append("pickup_postcode")
+            return m.group(1)
+    return None
 
 
 def _text(mail):
@@ -541,8 +590,10 @@ def extract(mail):
             raise RuntimeError("gateway returned unparsable JSON twice: %s" % str(data2)[:300])
         data = _merge_usage(data, data2)
     _fill_places(fields, mail)
-    if fix_units(fields, mail):                          # lb / inch copied as kg / cm: converted in code
+    if fix_units(fields, mail):                          # lb / inch / t / mm / net copied raw: fixed in code
         _log("unit_fix", tid, fixed=fields["unit_fix"])
+    if fix_incoterm(fields, mail):                       # EXW = door pickup, even without the word "pickup"
+        _log("exw_pickup", tid, postcode=fields["pickup_postcode"])
     _annotate(fields, mail, detected)
     fields["reply"], fields["reply_ok"] = safe_reply(fields.get("reply"), fields.get("language"),
                                                      multi=len(fields.get("shipments") or []) > 1)

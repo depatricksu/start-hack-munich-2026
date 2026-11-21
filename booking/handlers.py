@@ -36,6 +36,8 @@ MEETING_MIN_EUR = Decimal(os.environ.get("MEETING_MIN_EUR", "1500"))
 
 ACCEPT = re.compile(r"\b(accept\w*|book (it|this|that|the)|please book|go ahead|confirm(ed)?|agreed|deal|"
                     r"sounds good|let'?s do it|approved?|ja\b|buchen|bitte buchen|einverstanden|passt|auftrag|"
+                   r"proceed|works for us|(?:ok|okay|fine) for us|we'?ll take it|we will take it|go for it|please arrange|"
+                   r"yes,? (?:please|that works|we agree|go)|machen wir so|alles klar|in ordnung|va bene|procedete|procedi|"
                     r"bestätig\w*|d'accord|réserv\w*|acepto|reserv\w*|confermo|prenot\w*)", re.I)
 DECLINE = re.compile(r"\b(no,? thanks?|decline\w*|not interested|cancel\w*|we pass|found another|went with another|"
                      r"nein|kein interesse|absagen|storn\w*|anderen anbieter|non merci|no gracias)\b", re.I)
@@ -47,6 +49,7 @@ NEGATED_PROCEED = re.compile(r"\b(won'?t|will not|would not|do(es)?\s*n'?t|did\s
 HEDGE = re.compile(r"\b(yet|still|for now|at the moment|right now|checking|review\w*|noch|momentan|gerade|pr[uü]f\w*)\b", re.I)
 PRICE = re.compile(r"\b(cheaper|better price|best price|lower( the)? price|discount|too expensive|too high|negotiat\w*|"
                    r"budget|match|günstiger|rabatt|zu teuer|preis\w* (senken|nachlass|verhandeln)|moins cher|"
+                   r"do (?:any |a bit |a little )?better|better (?:offer|rate|deal)|lower (?:rate|offer)|"
                    r"más barato|descuento|sconto)\b", re.I)
 QUESTION = re.compile(r"\?|\b(could you|can you|what about|instead|cheaper|faster|change|könnten sie|anders)\b", re.I)
 BK = re.compile(r"\bBK-[A-Za-z0-9]{6,12}\b")
