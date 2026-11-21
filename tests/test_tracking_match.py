@@ -65,3 +65,18 @@ class TestTrackingMatch(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSessionsFallback(unittest.TestCase):
+    def test_a_hand_booked_session_not_in_crm_is_still_found(self):
+        import json as _json
+        from core import db
+        tid = 97777
+        db.con().execute("INSERT OR REPLACE INTO sessions(thread_id,customer,status,fields,chosen,note,received_at) VALUES(?,?,?,?,?,?,?)",
+                         (tid, "acme-widgets@hackloop.mail", "booked",
+                          _json.dumps({"origin": "FRA", "destination": "DOH", "weight_kg_total": 412}),
+                          _json.dumps({"airline": "Meridian Freightways", "transit_days": 2}),
+                          "booked by hand ref BK-HANDBK01", 1.0))
+        b, how = tracking.find_booking("Status of our shipment FRA to DOH, 412 kg. Acme Widgets GmbH.")
+        self.assertEqual(b["booking_reference"], "BK-HANDBK01")
+        self.assertIn("DOH", b["destination"])
