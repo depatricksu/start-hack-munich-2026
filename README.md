@@ -1,69 +1,73 @@
-# START Hack Munich 2026
+# Who answers at 2 a.m.? A digital air forwarder
 
-Key info collected from the event Discord on Sat 21 Nov 2026.
+**Team Google · START Hack Munich 2026 · 5U AI challenge**
 
-- **Where:** Audimax, TUM Main Campus (U2 Theresienstraße)
-- **Format:** 24 h · ~250 hackers · ~65 teams · 5 challenges
-- **Guidebook (single source of truth):** https://munichstart.notion.site/Guidebook-START-HackMunich-2026-4167680686328172b9dadd06d9cf0fb1 (briefs, judging criteria, slides, prizes on the *Challenges* page)
-- **Hack League app:** teams, challenge ranking, full briefs
+One mailbox, a new air-export request every 6 minutes, all night. This program reads every mail, prices every
+request from rate sheets, the rate portal and carrier bids, replies in the customer's thread with one all-in total,
+books on acceptance, answers tracking questions, and hands the judgement calls to a person.
 
-## Deadlines
+> **Our rule:** code does the math, AI reads the mail, people make the calls.
+> One small gateway call per quote. Prices never come from the model. When something is unclear, the session goes to
+> `needs_human` instead of a guess, because only the first quote in a thread counts.
 
-| When | What |
-|---|---|
-| Sat 12:45 | Teams lock (unassigned people get placed) |
-| Sat 13:05 | Captains rank top 3 challenges in the app (last save counts) |
-| Sat 13:10 | Challenge allocation shown in the app |
-| Sat 13:15 | Hacking starts → go to your challenge's Discord channel |
-| Sat 16:00–17:00 | Recruiting Hour with partners |
-| Sat 19:00 / 00:00 | Dinner / midnight snack |
-| **Sun 12:45** | **Project submission closes** |
-| Sun 15:30 | Closing ceremony |
-| Sun 23:59 | Redeem OpenAI vouchers |
+## How one request flows
 
-## Our track: 5U AI · "Build the Forwarder"
+```
+mail in ─► router ─► one gateway call ─► gate ─► price ─► pick ─► reply in thread ─► book ─► track
+            rules     fields as JSON    stop or   sheets   cheapest   one all-in      rate ID   from our
+            by sender (+ reply text)    warn      portal   fastest    total + DG      on accept own CRM
+                                                  bids     balanced   paragraph
+                         ▲                                                  │
+              attachments: DG declaration,                         unsure ─► needs_human ─► control room
+              packing-list weight/volume (dg/)                                              "send as human"
+```
 
-- **Room:** 1180 · **Discord:** #5u-ai · booth on site for questions
-- **Task:** be an AI freight forwarder. One mailbox, a new request every ~6 minutes, in any language. The agent must:
-  1. read every mail (any language),
-  2. price every request,
-  3. answer it,
-  4. escalate the judgement calls to a human.
-- The industry "changes by the hour" → expect rule/price updates during the hack.
-- **Pitch:** every team pitches to 5U at the end for the top 3 prizes.
-- **Prize:** fly a real plane yourself ✈️ + €300 / €200 / €100 from START Munich for the top 3.
-- **Material:** 5U AI pitch slides (guidebook → Challenges) and deep-dive PDF in #5u-ai. Full brief in the Hack League app.
-
-**Full challenge breakdown: [docs/5u-challenge.md](docs/5u-challenge.md)**
-
-> ⚠️ Agent LLM calls must go through 5U's **LLM gateway (OpenAI models only)**. Quotes without a gateway call get no cost points. Claude Code is fine as a *coding tool*.
-
-## Other challenges (for reference)
-
-| Partner | Room | Notes |
+| Step | Where | What it does |
 |---|---|---|
-| **QuantCo** – "Claim to Fame" | 1200 | Live insurance-pricing game. 70 % leaderboard, 30 % approach + presentation. |
-| **Feyer** – "Faster Physics" | 0602 | Speed up a JAX optical simulator. Repo: https://github.com/feyerlabs/start-hack-munich-2026 |
-| **revel8** – "Agentic Social Engineer" | 0606 | Agent wins over AI twins via revel8's API. |
+| Poll, log, send | `core/` | The one loop: polls the mailbox, saves every mail and decision to SQLite, the only place that sends mail |
+| Route | `router/` | Rules by sender and subject, no LLM: RFQ, follow-up, carrier bid, rate desk, tracking, tariff, booking |
+| Read | `llm/` | The single gateway call: the RFQ as JSON + reply text with `{PRICE}` placeholders; language detection; a quality gate on every reply |
+| Gate | `shared/rfq.py` | Stops or warns with reason codes: missing data, multi-shipment, unclear request |
+| Price | `pricing/` | Tariffs from the 10 rate sheets (PDF, XLSX, DOCX, TXT, and two JPG pages transcribed by hand), chargeable weight, minimums, every weight break; live tariff mails update prices |
+| Source | `sourcing/` | Rate portal (rate IDs, deeper weight breaks, rate limits, FX), carrier and trucker bids by mail, balanced 50/50 pick |
+| Dangerous goods | `dg/` | Reads attachments (xlsx, docx, pdf), finds UN number / class, adds the DG paragraph to the quote; compares packing-list weight and volume with the mail |
+| Book and track | `booking/` | Book by rate ID on acceptance, keep the customer informed, answer tracking from our own bookings |
+| Take over | `actions/` + `ui/` | Next.js control room: sessions with status and countdown, live event stream, "send as human" |
+| Learn and watch | `learn/`, `monitor/`, `core/alarm.py` | Inverts the scorer's points to find its best price, diffs 5U's setup every minute, posts alarms with the full log into the team chat |
+| Audit | `audit/` | Re-parses every rate sheet independently and diffs it with `pricing/tariffs.json` |
 
-## Free compute
+## What the night taught us
 
-### OpenAI
-$50 ChatGPT/Codex + $20 API, emailed after check-in (subject: "Your START Hack Munich vouchers"). Check spam. Links are single-use; redeem by **Sun 23:59**. Missing? DM Sivaram (START Munich) on Discord.
+We treated the public leaderboard as data. Each finding became a fix within minutes:
 
-### AMD Radeon Cloud
-48 GB VRAM, 16 cores, 55 GB RAM per GPU; ROCm, PyTorch, vLLM preinstalled. 48 free GPU-hours per person.
+| Finding | Evidence | Fix |
+|---|---|---|
+| The scorer prices at a higher weight break when it is cheaper per kilo | Leaders booked 676 kg as 1,000 kg and 1,233 kg as 2,000 kg | Price every higher bracket, sheets and portal |
+| The scorer picks the **balanced** trucker (price and speed 50/50), not the cheapest | Round 4 reproduced to the cent | `BID_PICK=balanced` |
+| Accuracy is symmetric: too low is rejected like too high | `too_low` verdict, round 9 | Count every lot; never drop a leg |
+| 5U's hourly change at 17:00: dangerous goods declared only in the attachment | `dg_docs_missing`, rounds 10–11 | `dg/`: read attachments, quote with the DG documents paragraph |
+| A USD portal price without an exchange rate was labelled EUR | ~8 % off | Keep the currency, flag `fx_missing` |
 
-1. Sign in at https://radeon-global.anruicloud.com/ with **Login with Email** (not the AMD Developer Program login).
-2. Fill in https://tally.so/r/2jKBye with the same email. Credits land at the next full hour (click your name → 48 credits + Hackathon pool).
-3. **Add your SSH key before launching** (`ssh-keygen -t ed25519`, then Settings → New SSH key). Keys added later require destroy + relaunch.
-4. Launch: Customize → Notebook · 1 GPU · vLLM latest · pool **Hackathon** · persistent `/workspace` · auto-delete 1 day.
+## Running it
 
-Gotchas: running instances burn credits (no pause, destroy when done) · only `/workspace` survives · don't `pip install torch` · one instance per account · "waiting for GPU" → check Hackathon pool.
-No GPU needed? **Token Factory** tab = OpenAI-compatible API (key starts `rc-`), no GPU credits used.
+Python 3.9+, standard library only. Keys live in `.env` (see `env.example`), never in git.
 
-## Logistics
-- Bring: laptop + charger, phone charger, sleeping bag/blanket, swimwear + towel (ice plunge).
-- Food, drinks and caffeine provided.
-- FlixBus voucher: mail s.nalliboyana@startmunich.de with your name and departure city.
-- Questions: any organiser/volunteer, or #help-desk.
+```bash
+python3 -m core.main --fake examples/rfq.json   # one fake mail through the whole loop, no key, no network
+DRY_RUN=1 python3 -m core.main                  # read the live mailbox, never send
+DRY_RUN=0 python3 -m core.supervise             # the one live runner: restarts the clerk after a crash
+python3 -m core.restart --check                 # imports, all tests, a fake quote: is this code safe to go live?
+python3 -m core.replay                          # today's code on every real request we got, vs 5U's points
+python3 -m audit.sheets                         # rate sheets vs tariffs.json
+python3 -m unittest discover -s tests           # 200+ tests
+cd ui && npm install && npm run dev             # the control room
+```
+
+## How four people and four agents built it in one night
+
+One repo, one folder per owner, small commits to `main`, and one rule: only the runner sends mail (`DRY_RUN=1`
+everywhere else). The agents coordinate in a GitHub issue with four words: `CLAIM` before building, `DONE` with the
+commit, `NEED` from another owner, `CHANGE` when a shared interface moves. A change goes live only through
+`core.restart`, which runs the tests and a fake quote first and keeps the old code running if anything fails.
+Rules for every agent: [`CLAUDE.md`](CLAUDE.md). Challenge brief: [`docs/5u-challenge.md`](docs/5u-challenge.md).
+Event logistics: [`docs/event-notes.md`](docs/event-notes.md).
