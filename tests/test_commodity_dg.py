@@ -1,0 +1,38 @@
+"""DG inferred from the commodity name (aerosols/spray cans etc.) with no UN number declared.
+5U trick 21 Nov: lindqvist-medtech 'maintenance spray cans' quoted as general cargo -> declined. Run: python -m unittest tests.test_commodity_dg"""
+import os, tempfile, unittest
+os.environ.setdefault("DB_PATH", os.path.join(tempfile.mkdtemp(), "t.db"))
+os.environ.setdefault("DRY_RUN", "1"); os.environ.setdefault("LLM_FAKE", "1"); os.environ.setdefault("FIVEU_API_KEY", "")
+from dg import quote  # noqa: E402
+
+
+class TestCommodityDG(unittest.TestCase):
+    def test_spray_cans_detected(self):
+        info = quote.read_declaration("Commodity: maintenance spray cans, 4 pieces. Gross weight 855 kg.")
+        self.assertIsNotNone(info)
+        self.assertEqual(info["un"], "UN1950")
+        self.assertTrue(info.get("inferred"))
+
+    def test_lithium_detected(self):
+        info = quote.read_declaration("10 cartons of lithium-ion batteries for medical devices")
+        self.assertEqual(info["class"], "9")
+
+    def test_plain_cargo_not_flagged(self):
+        for t in ["Commodity: machine parts, 4 pieces", "textile samples", "replacement gearboxes", "measuring instruments"]:
+            self.assertIsNone(quote.read_declaration(t), t)
+
+    def test_explicit_non_dangerous_blocks_inference(self):
+        self.assertIsNone(quote.read_declaration("spray cans, these are non-dangerous goods"))
+
+    def test_apply_adds_dg_paragraph(self):
+        os.environ["DG_MODE"] = "docs"
+        best = {"airline": "X", "total_eur": "416.16", "total": "416.16", "currency": "EUR", "billed_kg": 855}
+        fields = {"dg": quote.read_declaration("maintenance spray cans"), "language": "en"}
+        _, body, human = quote.apply(best, fields, "Hi,\n\nHere is your quote: 416.16 EUR.\n\nBest regards")
+        self.assertIsNone(human)                       # docs mode: still quote, just ask for the papers
+        self.assertIn("dangerous goods documents", body)
+        self.assertNotIn("shipping documents declare", body)   # accurate opener for inferred DG
+
+
+if __name__ == "__main__":
+    unittest.main()
