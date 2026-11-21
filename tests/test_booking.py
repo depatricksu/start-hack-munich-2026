@@ -245,6 +245,57 @@ class TestPortalErrors(unittest.TestCase):
         self.assertTrue(any(m["to"] == "riverbend-cargo@hackloop.mail" and "R-test12345678" in m["body"] for m in mails))
         self.assertTrue(any(m["to"] == CUSTOMER for m in mails[1:]))            # the customer was told
 
+    def live(self, responses):
+        """Patches for the live path; use as a context manager around answer()/main.process()."""
+        def api(method, path, body=None, params=None, timeout=20):
+            if path == "/v1/mailbox/messages":
+                return 201, {"id": 1}
+            return responses.pop(0)
+        return mock.patch.multiple(handlers.mailbox, api=api), mock.patch.object(config, "DRY_RUN", False)
+
+    def test_booking_price_above_quote_asks_the_customer(self):
+        """5U 20:45 (rounds 48, 49): the portal booked 10% above the quoted rate and we confirmed the old price
+        (-22.5 points each). Now: no 'booked at <old price>' mail; the customer gets the new total and a question."""
+        tid = 6400
+        quote(tid, portal=True)
+        p1, p2 = self.live([self.booked("BK-UP000001", price="475.20")])          # quote was 432.00
+        with p1, p2, mock.patch.object(main.mailbox, "api", handlers.mailbox.api):
+            answer(tid, 1, "Please book it.")
+            self.assertEqual(db.session(tid)["status"], "reprice_proposed")
+            mails = [m for m in sent(tid) if m["to"] == CUSTOMER]
+            self.assertIn("475.20", mails[-1]["body"]); self.assertIn("432.00", mails[-1]["body"])
+            self.assertFalse(any("BK-UP000001" in m["body"] for m in mails))       # nothing confirmed at the old price
+            # the airline's confirmation arrives before the customer answers: recorded, but no 'confirmed' mail yet
+            main.process(main.mailbox.normalize({"id": tid + 5, "from": "riverbend-airlines-cargo@hackloop.mail",
+                                                 "subject": "Booking BK-UP000001 confirmed",
+                                                 "body": "Booking reference: BK-UP000001\nYour reference: %s\nPrice: 475.20 EUR" % crm.team_reference(tid)}))
+            self.assertEqual(db.session(tid)["status"], "reprice_proposed")
+            self.assertEqual(len([m for m in sent(tid) if m["to"] == CUSTOMER]), len(mails))
+            answer(tid, 2, "Yes, that is fine. Please go ahead.")
+        self.assertEqual(db.session(tid)["status"], "confirmed")
+        last = [m for m in sent(tid) if m["to"] == CUSTOMER][-1]["body"]
+        self.assertIn("BK-UP000001", last)
+        self.assertEqual(crm.get(tid)["price"], "475.20")
+
+    def test_customer_declines_the_new_price(self):
+        tid = 6460
+        quote(tid, portal=True)
+        p1, p2 = self.live([self.booked("BK-UP000002", price="475.20")])
+        with p1, p2, mock.patch.object(main.mailbox, "api", handlers.mailbox.api):
+            answer(tid, 1, "Please book it.")
+            answer(tid, 2, "No thanks, we will not go ahead at that price.")
+        s = db.session(tid)
+        self.assertEqual(s["status"], "needs_human")
+        self.assertIn("cancel booking BK-UP000002", s["note"])
+        self.assertEqual(crm.get(tid)["status"], "cancel_pending")
+
+    def test_booking_at_the_quoted_price_is_confirmed_as_before(self):
+        self.assertIsNone(handlers.booked_above_quote({"total": "432.00", "currency": "EUR"}, {"price": "432.00", "currency": "EUR"}))
+        self.assertIsNone(handlers.booked_above_quote({"total": "432.00", "currency": "EUR"}, {"price": "420.00", "currency": "EUR"}))
+        self.assertEqual(str(handlers.booked_above_quote(                      # truck leg stays, the flight goes up 10%
+            {"total": "4128.50", "currency": "EUR", "flight_total": "3699.20", "flight_currency": "EUR"},
+            {"price": "4069.12", "currency": "EUR"})), "4498.42")
+
     def test_retry_200_counts_as_booked(self):
         tid = 6300
         self.run_live(tid, [(200, self.booked("BK-RETRY001")[1])])
