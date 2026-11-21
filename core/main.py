@@ -364,6 +364,21 @@ def by_deadline(tid, options, fields):
     return (ok, False) if ok else (options, True)
 
 
+REVISED = {"en": "Thanks for the updated details. This offer replaces my earlier one%s.",
+           "de": "Danke für die aktualisierten Angaben. Dieses Angebot ersetzt mein vorheriges%s.",
+           "fr": "Merci pour les nouvelles informations. Cette offre remplace la précédente%s.",
+           "it": "Grazie per i dati aggiornati. Questa offerta sostituisce la precedente%s.",
+           "es": "Gracias por los datos actualizados. Esta oferta sustituye a la anterior%s."}
+
+
+def revised_note(body, fields, lang):
+    """One line after the greeting on a re-quote, so the customer sees which offer counts."""
+    old = (fields.get("revised") or {}).get("total")
+    line = REVISED.get(lang, REVISED["en"]) % ((" (%s EUR)" % old) if old else "")
+    head, sep, rest = body.partition("\n\n")
+    return head + "\n\n" + line + "\n\n" + rest if sep else line + "\n\n" + body
+
+
 def finalize(tid):
     """Pick the best option and send the one quote. Called right away, or when the bid wait is over."""
     s = db.session(tid)
@@ -400,6 +415,8 @@ def finalize(tid):
             db.event("humanize", tid, changes=touched)
     except Exception as e:
         db.event("humanize_error", tid, error=str(e)[:200])
+    if fields.get("revised"):                                # the customer changed the shipment after our first quote
+        body = revised_note(body, fields, llm.reply_lang(fields))
     if why:                                                  # the model's text failed the gate: our own template went out
         db.event("reply_gate", tid, reasons=why, language=fields.get("language"))
     subject = s["subject"] if s["subject"].lower().startswith("re:") else "Re: " + s["subject"]

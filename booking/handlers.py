@@ -543,6 +543,58 @@ def correction_before_quote(s, mail):
         return main.needs_human(tid, mail, "customer corrected the shipment, no sheet/portal price for the new weight")
 
 
+REVISE = re.compile(r"\b(chang\w+|updat\w+|revis\w+|correct\w+|re-?quote|new (?:offer|quote|quotation|weight|details|dimensions|figures)|"
+                    r"final packing list|ge[äa]ndert\w*|aktualisier\w+|korrigier\w+|neues angebot|modifi\w+|mise? à jour|"
+                    r"nouvelle offre|cambia\w+|aggiorna\w+|nuova offerta|actualiz\w+|nueva oferta)\b", re.I)
+PIECES = re.compile(r"\b(\d{1,4})\s*(?:pieces?|pcs|packages?|cartons?|pallets?|colli|packst[üu]cke|paletten|colis|bultos)\b", re.I)
+
+
+def correction_after_quote(s, mail):
+    """5U, 22 Nov 00:38 (round 86): AFTER our quote the customer wrote 'the final packing list came in, and the
+    shipment details have changed to: 5 pieces, 1317 kg gross weight, 8.18 cbm. Could you please update your offer?'
+    The clerk parked it as an unclear reply; it was re-quoted by hand and accepted.
+
+    Now a mail on an OPEN quote that changes weight or volume and asks for a new offer gets one: the new totals go
+    into the form, the old bids are set aside (they were for the old weight), and sheets, portal and carriers are asked
+    again through the normal path, which sends the updated offer in the same thread. Code only, no gateway call.
+    Returns True when it took the mail; False leaves the mail to the normal reply rules."""
+    from core import config, main, mailbox
+    from shared.rfq import extract_rfq
+    from sourcing import bids
+    tid = s["thread_id"]
+    text = own_text(mail["body"], mail.get("subject"))
+    if not REVISE.search(text):
+        return False
+    r = extract_rfq("", text)
+    fields = json.loads(s["fields"] or "{}")
+    old_kg, old_cbm = fields.get("weight_kg_total"), fields.get("volume_cbm_total")
+    changed = {}
+    if r.weight_kg and (not old_kg or abs(float(r.weight_kg) - float(old_kg)) > 0.5):
+        changed["weight_kg_total"] = float(r.weight_kg)
+    if r.volume_cbm and (not old_cbm or abs(float(r.volume_cbm) - float(old_cbm)) > 0.005):
+        changed["volume_cbm_total"] = float(r.volume_cbm)
+    if not changed or len(fields.get("shipments") or []) > 1:    # nothing new, or several shipments: a person decides
+        return False
+    quoted = (json.loads(s["chosen"] or "null") or {}).get("total")
+    fields.update(changed)
+    fields["weight_kg"], fields["volume_cbm"] = fields.get("weight_kg_total"), fields.get("volume_cbm_total")
+    pcs = PIECES.search(text)
+    fields["pieces"] = [{"count": int(pcs.group(1)), "l_cm": None, "w_cm": None, "h_cm": None, "kg_each": None}] if pcs else []
+    fields["customer_numbers"] = sorted(set((fields.get("customer_numbers") or []) + re.findall(r"\d+(?:[.,]\d+)?", text)))
+    fields["revised"] = {"weight_kg": old_kg, "volume_cbm": old_cbm, "total": quoted, "mail_id": mail["id"]}
+    bids.ensure()
+    db.con().execute("UPDATE bids SET thread_id=? WHERE thread_id=?", (-tid, tid))   # kept as history; request() asks again
+    db.update_session(tid, status="new", fields=fields, reply_template="", deadline=time.time() + config.BID_WAIT_S,
+                      note="customer changed the shipment after the quote: new quote")
+    db.event("requote", tid, mail["id"], changed=changed, before={"weight_kg_total": old_kg, "volume_cbm_total": old_cbm, "total": quoted})
+    first = db.con().execute("SELECT raw, body FROM mails WHERE id=?", (tid,)).fetchone()
+    m = mailbox.normalize(json.loads(first["raw"])) if first and first["raw"] else dict(mail, id=tid, attachments=[])
+    m["thread_id"], m["is_thread_start"] = tid, True
+    m["body"] = text + "\n\n" + ((first["body"] if first else "") or "")
+    main.price_and_quote(tid, m, fields)
+    return True
+
+
 PRICE_TOLERANCE = Decimal("1.005")       # a booking price up to 0.5% above the quote is rounding, not a new price
 
 
@@ -623,6 +675,8 @@ def handle_follow_up(mail):
         return db.event("follow_up_ignored", tid, mail["id"], status=s and s["status"])
     if mail["sender"] != (s["customer"] or "").lower():          # only the customer who asked can book on this quote
         return _needs_human(tid, mail["id"], "reply from %s, not from the customer %s" % (mail["sender"], s["customer"]))
+    if s["status"] == "quoted" and correction_after_quote(s, mail):   # "the details changed, please update your offer"
+        return None
     verdict = classify(mail["body"], mail.get("subject"))
     db.event("follow_up", tid, mail["id"], verdict=verdict, status=s["status"])
     if verdict == "auto_reply":                                  # out-of-office robot: no alarm, the quote stays open
