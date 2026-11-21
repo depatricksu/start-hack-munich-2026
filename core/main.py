@@ -7,7 +7,7 @@
 Loop: poll mailbox -> save mail -> router decides the route -> HANDLERS[route](mail).
 To add a feature, write a handler in your own folder and register it in HANDLERS below.
 """
-import csv, json, os, re, sys, time, traceback
+import csv, json, os, re, sys, time, traceback, urllib.error
 from decimal import Decimal
 from . import attachments, config, db, mailbox, safety
 from router.route import route
@@ -132,6 +132,34 @@ def quote_in_eur(best):
                 total=str(Decimal(best["total_eur"]).quantize(Decimal("0.01"))), currency="EUR")
 
 
+# Pauses before the 2nd and 3rd try of a quote send that FAILED. After the last one the session is `failed`.
+SEND_RETRY_WAITS_S = tuple(float(x) for x in os.environ.get("SEND_RETRY_WAITS_S", "2,5").split(",") if x.strip())
+
+
+def send_quote(tid, to, subject, body):
+    """Send the one quote of a thread; a failed send is tried again, a send that may have worked never is.
+
+    Retried: mailbox.send returned False (5U answered with an error status instead of 201; its own 429 waits are
+    already used up) or the connection failed before the request left (URLError: DNS, refused, connect timeout).
+    NOT retried: anything raised after the request went out (read timeout, dropped connection). 5U may have
+    stored the mail and we cannot list our sent mails, so a second send could be a second quote: that error goes
+    up to the caller, as before. The caller holds the claim_for_sending lock, so nothing else sends meanwhile.
+    Left over: a 5xx counts as "not sent", which is what HTTP promises but 5U does not state."""
+    for attempt, wait in enumerate((0,) + SEND_RETRY_WAITS_S):
+        if attempt:
+            db.event("quote_send_retry", tid, attempt=attempt, wait_s=wait)
+            time.sleep(wait)
+        try:
+            if mailbox.send(to, subject, body, in_reply_to=tid, thread_id=tid):
+                return True
+        except urllib.error.URLError as e:                   # never reached 5U: safe to send again
+            db.event("quote_send_error", tid, attempt=attempt, error=str(e))
+        except Exception as e:                               # outcome unknown: do not risk a second quote
+            db.event("quote_send_unknown", tid, attempt=attempt, error="%s: %s" % (type(e).__name__, e))
+            raise
+    return False
+
+
 def finalize(tid):
     """Pick the best option and send the one quote. Called right away, or when the bid wait is over."""
     s = db.session(tid)
@@ -154,7 +182,7 @@ def finalize(tid):
     if why:                                                  # the model's text failed the gate: our own template went out
         db.event("reply_gate", tid, reasons=why, language=fields.get("language"))
     subject = s["subject"] if s["subject"].lower().startswith("re:") else "Re: " + s["subject"]
-    ok = mailbox.send(s["customer"], subject, body, in_reply_to=tid, thread_id=tid)
+    ok = send_quote(tid, s["customer"], subject, body)      # retried when the send failed, never after a success
     now = time.time()
     db.update_session(tid, status="quoted" if ok else "failed", chosen=best, reply=body, quoted_at=now)
     db.event("quote_sent" if ok else "quote_failed", tid, chosen=best, seconds=round(now - s["received_at"], 1),
