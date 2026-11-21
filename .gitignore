@@ -6,3 +6,6 @@ __pycache__/
 .DS_Store
 *.pem
 data/
+.claude/.agent-chat-seen
+.claude/.agent-chat-me
+.claude/settings.local.json
