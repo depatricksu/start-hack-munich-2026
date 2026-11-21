@@ -40,6 +40,13 @@ Cost per quote = sum `llm_cost_usd` / count `quoted`. Bid answer time = `replied
 `GET {BASE_URL}/v1/board/me` with `X-API-Key`: per request the verdict (`accepted`, `rejected`, `pending`, `no answer`, `voided`),
 reason code and points. Call it from the UI server, never from the browser (the key stays secret). Match rows to sessions by round and time.
 
+## Stack: Next.js (decided by Erik, 21 Nov)
+- `ui/` is a Next.js + Tailwind app. It runs on the same machine as the DB (the runner MacBook), so no separate API service is needed.
+- Server route handlers open `data/forwarder.db` read-only with `better-sqlite3` (the DB is in WAL mode, so reads never block the loop).
+- Live thread: a route handler streams new `events` rows to the browser (Server-Sent Events), polling the DB every second.
+- Score panel: a route handler calls `/v1/board/me` with the key from the server env. The key never reaches the browser.
+- Take-over writes only the `actions` table (proposal below). The UI never sends mail itself: only `core/` sends.
+
 ## Proposed additions (need the `core/` owner to agree)
 1. **Take-over.** The UI is read-only, so a human reply needs a table `actions(id, thread_id, kind, body, created_at, done_at)`.
    The UI inserts `kind='send_reply'` or `'pause'`; `core/` polls it and sends through `mailbox.send` (the only sender).

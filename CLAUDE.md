@@ -30,7 +30,7 @@ time 15 (full under 2 min). First RFQ Sat 16:00. Setup changes hourly without no
 | `pricing/` | tariff parsing + price math from sheets (exists) | TBD |
 | `sourcing/` | rate portal API (rate_id, 429 handling), carrier/trucker bid requests + bid parsing, booking | TBD |
 | `llm/` | gateway client, RFQ extraction (JSON) + reply text with `{PRICE}` placeholder, tracking replies | TBD |
-| `ui/` | sessions UI (Streamlit) reading the DB. Only after the main loop works | later |
+| `ui/` | sessions UI (Next.js, decided by Erik 21 Nov) reading the DB, spec in `docs/ui-data.md` | Erik |
 | `shared/` | tiny shared types. Frozen after first commit; change only after telling the team | TBD |
 
 ## Flow (one RFQ)
