@@ -4,8 +4,10 @@ The model never does math and never invents a price. It returns:
   - the shipment fields as JSON (code computes weight, volume and price from them)
   - a reply text with placeholders {PRICE} {AIRLINE} {TRANSIT_DAYS}, which code fills in later
 """
-import json, re
+import json, os, re, zlib
 from core import config, mailbox
+
+SIGNER = os.environ.get("SIGNER", "Lena Hofmann")   # the person who signs our mails (jury: most human email)
 
 SYSTEM = """You work at an air freight forwarder in Germany. Read the customer's email and answer with JSON only:
 {
@@ -26,10 +28,14 @@ SYSTEM = """You work at an air freight forwarder in Germany. Read the customer's
  "reply": the reply email body
 }
 Do not calculate anything. Copy numbers as written (convert units to cm and kg only).
-The reply: write it in the language of the customer's email, never any other (an English email gets an English reply, a German email a German reply). Greet with the full name exactly as written (for example "Guten Tag K. Weber" or "Hi Anna"); never add Frau, Herr, Mr or Ms. Short, warm, like a real colleague wrote it, no AI phrases.
+The reply: write it in the language of the customer's email, never any other (an English email gets an English reply, a German email a German reply). Greet with the name exactly as the customer signed (for example "Hi Anna" or "Guten Tag K. Weber"); never add Frau, Herr, Mr or Ms; no name -> "Hello" / "Guten Tag".
+Write like an experienced, friendly forwarder answering between two calls: 3 to 5 short sentences, plain words, no lists, no headings.
+Refer to THEIR shipment in their own words (what it is, where from and to, a detail they mentioned) so it is clearly not a form letter. Use {ROUTE} and {WEIGHT} if you want, code fills them in.
+Never use: "I hope this email finds you well", "Thank you for reaching out", "Certainly", "delighted", "Please do not hesitate", "valued customer", exclamation marks in a row, emojis.
 State one all-in price using exactly the placeholder {PRICE}. Mention {AIRLINE} and {TRANSIT_DAYS} days transit.
+End with one easy next step: they can simply reply to book it.
 If there are several shipments, do NOT use {PRICE}, {AIRLINE} or {TRANSIT_DAYS}: put {PRICE_TABLE} on its own line where the per-shipment prices go and state the all-in total with {TOTAL}.
-Never write a number for the price yourself. Sign as "Your forwarding team". Only if the reply is in German, sign as "Ihr Forwarding-Team" instead."""
+Never write a number for the price yourself. Sign with exactly two lines: "{SIGNER}" and then "Air Export" (in German "Luftfracht Export")."""
 
 # USD per 1M tokens (input, output). Only used for our own log; 5U measures the real cost.
 PRICES = {"gpt-4o-mini": (0.15, 0.60)}
@@ -47,7 +53,76 @@ _UNSAFE = re.compile(r"https?://|www\.|\S+@\S+\.\w+|\d+\s*%|\d[\d.,]*\s*(eur|€
                      r"\b(guarante\w*|garanti\w*|refund\w*|erstatt\w*|discount\w*|rabatt\w*|free of charge|kostenlos\w*|"
                      r"gratis|promis\w*|versprech\w*|insur\w*|versicher\w*|valid until|gültig bis|compensat\w*|"
                      r"entschädig\w*|liab\w*|haft\w*|no extra|keine zusatz\w*|lowest price|best price guaranteed)\b", re.I)
-_PLACEHOLDER = re.compile(r"\{(PRICE|AIRLINE|TRANSIT_DAYS|PRICE_TABLE|TOTAL)\}")
+_PLACEHOLDER = re.compile(r"\{(PRICE|AIRLINE|TRANSIT_DAYS|PRICE_TABLE|TOTAL|ROUTE|WEIGHT|SIGNER)\}")
+
+
+CITY = {"FRA": "Frankfurt", "MUC": "Munich", "DUS": "Düsseldorf", "HAM": "Hamburg", "STR": "Stuttgart", "CGN": "Cologne",
+        "ATL": "Atlanta", "BKK": "Bangkok", "BOG": "Bogotá", "BOM": "Mumbai", "CAI": "Cairo", "DEL": "Delhi",
+        "DFW": "Dallas", "DOH": "Doha", "DXB": "Dubai", "EZE": "Buenos Aires", "GRU": "São Paulo", "HKG": "Hong Kong",
+        "ICN": "Seoul", "JFK": "New York", "JNB": "Johannesburg", "KUL": "Kuala Lumpur", "LAX": "Los Angeles",
+        "LIM": "Lima", "LOS": "Lagos", "MEL": "Melbourne", "MEX": "Mexico City", "MIA": "Miami", "MNL": "Manila",
+        "NBO": "Nairobi", "NRT": "Tokyo", "ORD": "Chicago", "PEK": "Beijing", "PVG": "Shanghai", "RUH": "Riyadh",
+        "SCL": "Santiago", "SGN": "Ho Chi Minh City", "SIN": "Singapore", "SYD": "Sydney", "TLV": "Tel Aviv",
+        "TPE": "Taipei", "YYZ": "Toronto", "ASU": "Asunción", "KTM": "Kathmandu", "PPT": "Papeete",
+        "TNR": "Antananarivo", "ULN": "Ulaanbaatar"}
+CITY_DE = {"MUC": "München", "CGN": "Köln", "CAI": "Kairo", "MEX": "Mexiko-Stadt", "NRT": "Tokio", "PEK": "Peking",
+           "SIN": "Singapur", "RUH": "Riad"}
+
+HUMAN = {
+    "en": [
+        "{HELLO}\n\nthanks for sending the details for {ROUTE}. For your {WEIGHT} we can do {PRICE} all-in with {AIRLINE}, "
+        "around {TRANSIT_DAYS} days in transit.\n\nIf that works for you, just reply to this mail and I'll book it right away.\n\n"
+        "Best regards\n{SIGNER}\nAir Export",
+        "{HELLO}\n\nI've checked {ROUTE} for your {WEIGHT}: the best option right now is {AIRLINE} at {PRICE} all-in, "
+        "with about {TRANSIT_DAYS} days in transit.\n\nShall I go ahead? A short reply is enough and I'll take care of the booking.\n\n"
+        "Kind regards\n{SIGNER}\nAir Export",
+        "{HELLO}\n\ngood news on {ROUTE}: we can move your {WEIGHT} with {AIRLINE} for {PRICE} all-in, "
+        "transit roughly {TRANSIT_DAYS} days.\n\nLet me know and I'll get it booked for you.\n\n"
+        "Best wishes\n{SIGNER}\nAir Export",
+    ],
+    "de": [
+        "{HELLO}\n\ndanke für Ihre Anfrage {ROUTE}. Für Ihre {WEIGHT} können wir {PRICE} all-in mit {AIRLINE} anbieten, "
+        "Laufzeit etwa {TRANSIT_DAYS} Tage.\n\nWenn das für Sie passt, antworten Sie einfach kurz und ich buche direkt.\n\n"
+        "Viele Grüße\n{SIGNER}\nLuftfracht Export",
+        "{HELLO}\n\nich habe {ROUTE} für Ihre {WEIGHT} geprüft: Am besten passt aktuell {AIRLINE} mit {PRICE} all-in, "
+        "rund {TRANSIT_DAYS} Tage Laufzeit.\n\nSoll ich das so buchen? Eine kurze Antwort genügt.\n\n"
+        "Beste Grüße\n{SIGNER}\nLuftfracht Export",
+    ],
+}
+
+
+def _route(fields, lang):
+    o, d = (fields.get("origin") or "").upper(), (fields.get("destination") or "").upper()
+    names = dict(CITY, **CITY_DE) if lang == "de" else CITY
+    if not (o and d):
+        return "your shipment" if lang != "de" else "Ihre Sendung"
+    return ("von %s nach %s" if lang == "de" else "%s to %s") % (names.get(o, o), names.get(d, d))
+
+
+def _weight(fields, lang):
+    w = fields.get("weight_kg_total") or fields.get("weight_kg")
+    if not w:
+        return "shipment" if lang != "de" else "Sendung"
+    txt = ("{:,.0f}".format(float(w)) if float(w) == int(float(w)) else "{:,.1f}".format(float(w)))
+    return (txt.replace(",", "X").replace(".", ",").replace("X", ".") + " kg") if lang == "de" else (txt + " kg")
+
+
+def fill_reply(template, best, fields, customer="", thread_id=0):
+    """Fill our placeholders. No usable model reply (or one with an unknown placeholder) -> a human fallback."""
+    lang = "de" if (fields.get("language") or "").lower() == "de" else "en"
+    if not template or "{PRICE}" not in template:
+        variants = HUMAN[lang]
+        template = variants[zlib.crc32(str(thread_id).encode()) % len(variants)]
+    from booking.replies import first_name
+    name = first_name(customer)
+    hello = ("Hallo %s," % name if lang == "de" else "Hi %s," % name) if name else ("Guten Tag," if lang == "de" else "Hello,")
+    vals = {"PRICE": "%s %s" % (best["total"], best["currency"]), "AIRLINE": best["airline"],
+            "TRANSIT_DAYS": str(best["transit_days"]), "ROUTE": _route(fields, lang), "WEIGHT": _weight(fields, lang),
+            "SIGNER": SIGNER, "HELLO": hello}
+    body = re.sub(r"\{(PRICE|AIRLINE|TRANSIT_DAYS|ROUTE|WEIGHT|SIGNER|HELLO)\}", lambda m: vals[m.group(1)], template)
+    if re.search(r"\{[A-Z_]+\}", body):                      # unknown placeholder from the model: use our own text
+        return fill_reply("", best, fields, customer, thread_id)
+    return body
 
 
 def safe_reply(text, lang="en", multi=False):
@@ -57,7 +132,7 @@ def safe_reply(text, lang="en", multi=False):
         return t, True
     if multi:
         return "", False                                    # pricing/multi.py uses its own fallback
-    return (FALLBACK_REPLY_DE if (lang or "").lower() == "de" else FALLBACK_REPLY), False
+    return HUMAN["de" if (lang or "").lower() == "de" else "en"][0], False   # human fallback, same price
 
 
 def _fill_places(fields, mail):

@@ -63,7 +63,7 @@ class TestReply(unittest.TestCase):
 
     def test_german_fallback(self):
         text, ok = llm.safe_reply("Preis {PRICE}, garantiert!", "de")
-        self.assertIn("Ihr Forwarding-Team", text)
+        self.assertIn("Luftfracht Export", text)
 
     def test_clean_reply_kept(self):
         good = "Hi Anna,\n\nthanks for your request. Our all-in price is {PRICE} with {AIRLINE}, {TRANSIT_DAYS} days.\n\nBest regards"

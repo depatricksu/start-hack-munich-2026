@@ -13,14 +13,15 @@ from decimal import Decimal
 from core import config, db, mailbox
 from pricing import price as sheets
 from shared.rfq import Level, from_fields, validate
+from llm import extract as llm_extract
 
 _ZONES = os.path.join(config.ROOT, "kit", "start-kit", "pickup_zones.csv")
 ZONE_AIRPORT = {r["zone"]: r["airport"] for r in csv.DictReader(open(_ZONES))}
 
 FALLBACK = ("Hello,\n\nthank you for your request. Here are our all-in prices per shipment:\n\n{PRICE_TABLE}\n\n"
-            "All-in total: {TOTAL}\n\nBest regards\nYour forwarding team")
+            "All-in total: {TOTAL}\n\nIf that works for you, just reply and I'll book everything.\n\nBest regards\n{SIGNER}\nAir Export")
 FALLBACK_DE = ("Guten Tag,\n\nvielen Dank für Ihre Anfrage. Hier unsere Gesamtpreise je Sendung:\n\n{PRICE_TABLE}\n\n"
-               "Gesamtpreis: {TOTAL}\n\nMit freundlichen Grüßen\nIhr Forwarding-Team")
+               "Gesamtpreis: {TOTAL}\n\nWenn das passt, antworten Sie einfach kurz und ich buche alles.\n\nViele Grüße\n{SIGNER}\nLuftfracht Export")
 
 
 def _totals(s):
@@ -97,7 +98,7 @@ def handle(tid, mail, fields):
     # Code-only body (Erik's dry run: the LLM mixed {PRICE}/{AIRLINE} into multi replies). German if the mail was.
     template = FALLBACK_DE if (json.loads(s["fields"] or "{}").get("language") or "").lower() == "de" else FALLBACK
     body = (template.replace("{PRICE_TABLE}", "\n".join(_line(p) for p in parts))
-            .replace("{TOTAL}", "%.2f EUR" % total))
+            .replace("{TOTAL}", "%.2f EUR" % total).replace("{SIGNER}", llm_extract.SIGNER))
     if re.search(r"\{[A-Z_]+\}", body):                    # never send a raw placeholder
         db.update_session(tid, status="needs_human", note="reply still had a placeholder, not sent")
         return db.event("needs_human", tid, mail["id"], why="placeholder left in multi reply")

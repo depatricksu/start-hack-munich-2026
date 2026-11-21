@@ -108,13 +108,7 @@ def finalize(tid):
     if not db.claim_for_sending(tid):                        # someone already quoted this thread
         return db.event("quote_skipped_already_sent", tid)
 
-    template = s["reply_template"] if "{PRICE}" in (s["reply_template"] or "") else llm.FALLBACK_REPLY
-    body = (template.replace("{PRICE}", "%s %s" % (best["total"], best["currency"]))
-            .replace("{AIRLINE}", best["airline"]).replace("{TRANSIT_DAYS}", str(best["transit_days"])))
-    if re.search(r"\{[A-Z_]+\}", body):                    # a placeholder the model invented: never send it raw
-        db.event("reply_placeholder_left", tid, body=body[:300])
-        body = (llm.FALLBACK_REPLY.replace("{PRICE}", "%s %s" % (best["total"], best["currency"]))
-                .replace("{AIRLINE}", best["airline"]).replace("{TRANSIT_DAYS}", str(best["transit_days"])))
+    body = llm.fill_reply(s["reply_template"], best, fields, s["customer"], tid)   # llm/ (Patrick): never a raw placeholder
     subject = s["subject"] if s["subject"].lower().startswith("re:") else "Re: " + s["subject"]
     ok = mailbox.send(s["customer"], subject, body, in_reply_to=tid, thread_id=tid)
     now = time.time()
