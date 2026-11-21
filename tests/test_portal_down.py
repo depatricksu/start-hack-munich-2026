@@ -21,12 +21,19 @@ class TestPortalDownTriggersBids(unittest.TestCase):
         self.assertTrue(portal.LAST_DOWN)
 
     def test_request_asks_airlines_when_portal_down_even_with_sheet_options(self):
-        tid = 88001
+        import random
+        tid = random.randint(880000, 889999)          # unique: the suite shares one DB
+        db.con().execute("DELETE FROM bids WHERE thread_id=?", (tid,))
         db.con().execute("INSERT OR REPLACE INTO sessions(thread_id,customer,status,fields,options,received_at) VALUES(?,?,?,?,?,?)",
                          (tid, "c@x.mail", "new", '{"origin":"HAM","destination":"EZE","weight_kg_total":500}',
                           '[{"airline":"Wayzata Air Cargo","total_eur":"2000","transit_days":6,"source":"sheet"}]', 1.0))
+        orig = bids.serving                           # independent of the carrier-list file / DB state
+        bids.serving = lambda role, key: ([{"name": "Tamarind Airways", "email": "tamarind-airways@hackloop.mail"}] if role == "airline" else [])
         portal.LAST_DOWN = True                       # portal is down this round
-        pending = bids.request({"thread_id": tid}, {"origin": "HAM", "destination": "EZE", "weight_kg_total": 500, "pickup_postcode": None})
+        try:
+            pending = bids.request({"thread_id": tid}, {"origin": "HAM", "destination": "EZE", "weight_kg_total": 500, "pickup_postcode": None})
+        finally:
+            bids.serving = orig
         asked = [b for b in bids.rows(tid) if b["role"] in ("airline", "ratedesk")]
         self.assertGreater(len(asked), 0)             # we asked airlines + rate desk despite having a sheet option
         self.assertGreater(pending, 0)
