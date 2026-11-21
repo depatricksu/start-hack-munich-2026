@@ -253,7 +253,9 @@ def validate(r: RFQ) -> list[Issue]:
         add("destination", Level.HUMAN, f"nobody in the carrier list serves {r.destination}")
     if r.weight_kg is None:
         add("weight_kg", Level.MISSING, "no weight")
-    elif r.weight_kg <= 0 or r.weight_kg > 50_000:
+    elif r.weight_kg <= 0 or r.weight_kg > 100_000:          # portal max is 100 t: never quote outside
+        add("weight_kg", Level.HUMAN, f"weight {r.weight_kg} kg is impossible to quote")
+    elif r.weight_kg > 50_000:
         add("weight_kg", Level.WARNING, f"weight {r.weight_kg} kg looks wrong")
     if r.mode is None:
         add("mode", Level.WARNING, "customer did not say cheapest or fastest -> defaulting to cheapest")
@@ -333,6 +335,24 @@ def _cross_check(llm: RFQ, rx: RFQ) -> list[str]:
     return out
 
 
+_NEG_WEIGHT = re.compile(r"(?<![\w.])-\s*\d[\d.,]*\s*(kg|kgs|t|tons?|tonnen)\b", re.I)
+_THOUSANDS = re.compile(r"(?<![\d.,])(\d{1,3})[.,](\d{3})(?![\d.,])\s*(kg|kgs)\b", re.I)
+
+
+def _weight_traps(r: "RFQ", text: str) -> list[str]:
+    """Stops for weights a reader can get badly wrong (found by red-team mails)."""
+    out = []
+    if _NEG_WEIGHT.search(text):
+        out.append("weight_kg: negative weight in the mail")
+    m = _THOUSANDS.search(text)
+    if m and r.weight_kg is not None:
+        as_decimal = float("%s.%s" % (m.group(1), m.group(2)))
+        if abs(r.weight_kg - as_decimal) < 0.01:            # "1.200 kg" read as 1.2 kg: German 1200 kg is likelier
+            out.append("weight_kg: '%s' read as %s kg, could be %s kg" % (m.group(0), as_decimal,
+                                                                          int(m.group(1) + m.group(2))))
+    return out
+
+
 def gate(fields: dict, mail: dict) -> tuple[bool, str]:
     """(ok, note). ok=False -> needs_human with `note`. ok=True -> price it; note lists warnings (may be "").
 
@@ -359,5 +379,6 @@ def gate(fields: dict, mail: dict) -> tuple[bool, str]:
             stop.append(f"{i.field}: {i.message}")
         else:
             warn.append(f"{i.field}: {i.message}")
+    stop += _weight_traps(r, (mail.get("subject") or "") + "\n" + (mail.get("body") or ""))
     warn += _cross_check(r, extract_rfq(mail.get("subject") or "", mail.get("body") or ""))
     return (not stop), " | ".join(stop + warn)

@@ -24,9 +24,9 @@ def route(mail, our_address="google@hackloop.mail"):
         return "own"
     if re.search(r"booking\s+bk-", subject):
         return "booking_confirmation"
-    if sender.startswith("tracking@"):
+    if sender == "tracking@hackloop.mail":                    # exact: tracking@evil.mail is a customer
         return "tracking"
-    if sender.startswith("ratedesk@"):
+    if sender == "ratedesk@hackloop.mail":
         return "ratedesk"
     if sender in CARRIERS:
         if mail["attachments"] or "tariff" in subject or "rate sheet" in subject:

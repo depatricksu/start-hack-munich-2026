@@ -38,6 +38,34 @@ FALLBACK_REPLY = ("Hello,\n\nthank you for your request. Our all-in price is {PR
                   "transit time {TRANSIT_DAYS} days.\n\nBest regards\nYour forwarding team")
 
 
+FALLBACK_REPLY_DE = ("Guten Tag,\n\nvielen Dank für Ihre Anfrage. Unser Gesamtpreis beträgt {PRICE} mit {AIRLINE}, "
+                     "Laufzeit {TRANSIT_DAYS} Tage.\n\nViele Grüße\nIhr Forwarding-Team")
+
+# The model writes the reply text, so a customer can talk it into promises. Anything that is not ours to promise,
+# or a number we did not compute, sends the reply back to a fixed template (same price, no risk).
+_UNSAFE = re.compile(r"https?://|www\.|\S+@\S+\.\w+|\d+\s*%|\d[\d.,]*\s*(eur|€|usd|\$|chf|gbp|£)|(eur|€|usd|\$)\s*\d|"
+                     r"\b(guarante\w*|garanti\w*|refund\w*|erstatt\w*|discount\w*|rabatt\w*|free of charge|kostenlos\w*|"
+                     r"gratis|promis\w*|versprech\w*|insur\w*|versicher\w*|valid until|gültig bis|compensat\w*|"
+                     r"entschädig\w*|liab\w*|haft\w*|no extra|keine zusatz\w*|lowest price|best price guaranteed)\b", re.I)
+_PLACEHOLDER = re.compile(r"\{(PRICE|AIRLINE|TRANSIT_DAYS|PRICE_TABLE|TOTAL)\}")
+
+
+def safe_reply(text, lang="en", multi=False):
+    """Return the model's reply if it only uses our placeholders and promises nothing; else a fixed template."""
+    t = text or ""
+    if t and not _UNSAFE.search(_PLACEHOLDER.sub("", t)):
+        return t, True
+    if multi:
+        return "", False                                    # pricing/multi.py uses its own fallback
+    return (FALLBACK_REPLY_DE if (lang or "").lower() == "de" else FALLBACK_REPLY), False
+
+
+def _clip(body, head=3000, tail=3000):
+    """Same token budget as before, but the end of a long mail (where the request often is) is kept too."""
+    body = body or ""
+    return body if len(body) <= head + tail else body[:head] + "\n[...]\n" + body[-tail:]
+
+
 def extract(mail):
     """Returns (fields dict, usage dict). Exactly one gateway call."""
     if config.LLM_FAKE:
@@ -47,11 +75,13 @@ def extract(mail):
         "max_completion_tokens": config.LLM_MAX_TOKENS,
         "response_format": {"type": "json_object"},
         "messages": [{"role": "system", "content": SYSTEM},
-                     {"role": "user", "content": "Subject: %s\n\n%s" % (mail["subject"], mail["body"][:6000])}],
+                     {"role": "user", "content": "Subject: %s\n\n%s" % (mail["subject"], _clip(mail["body"]))}],
     })
     if status != 200:
         raise RuntimeError("gateway %s: %s" % (status, str(data)[:300]))
     fields = json.loads(data["choices"][0]["message"]["content"])
+    fields["reply"], fields["reply_ok"] = safe_reply(fields.get("reply"), fields.get("language"),
+                                                     multi=len(fields.get("shipments") or []) > 1)
     u = data.get("usage") or {}
     usage = {"model": config.LLM_MODEL, "in": u.get("prompt_tokens"), "out": u.get("completion_tokens")}
     if config.LLM_MODEL in PRICES and usage["in"] is not None:

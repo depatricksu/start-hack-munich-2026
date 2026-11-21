@@ -66,6 +66,8 @@ def handle_rfq(mail):
 
     if not (fields.get("origin") and fields.get("destination") and weight > 0):
         return needs_human(tid, mail, "could not read origin, destination or weight")
+    if weight > 100_000 or not (0 <= volume <= 1000):         # portal limits: never quote outside them
+        return needs_human(tid, mail, "weight %s kg / volume %s cbm out of range" % (weight, volume))
 
     o, d = fields["origin"].upper(), fields["destination"].upper()
     options = [dict(x, total_eur=x["total"]) for x in sheets.options(o, d, weight, volume)]
