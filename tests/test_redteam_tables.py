@@ -62,28 +62,27 @@ REPLIES = [
     ("Merci, mais nous ne donnerons pas suite à cette offre.", "decline"),
     ("Gracias, pero no vamos a reservar con ustedes.", "decline"),
     ("Va bene, procediamo con la prenotazione.", "accept"),
+    # fixed (#53): a bare yes to OUR quote, in thread, with nothing else in it
+    ("ok", "accept"),
+    ("Yes", "accept"),
+    (QUOTED + "\nok", "accept"),
+    ("Bitte um Buchung.", "accept"),
+    ("De acuerdo.", "accept"),
+    ("Sí, adelante.", "accept"),
+    # fixed (#54): the answer is the last sentence, a "but" in an old story does not count
+    (LONG_YES_WITH_BUT, "accept"),
+    # fixed (#55, #57)
+    ("Thanks, but we decided to go with another forwarder this time.", "decline"),
+    ("Thanks a lot, we'll pass on this one.", "decline"),
+    ("È possibile avere un prezzo migliore?", "better_price"),
+    ("C'est un peu cher, vous pouvez faire mieux ?", "better_price"),
+    # fixed (#58, #59): a yes, DG papers follow
+    ("Passt, das Sicherheitsdatenblatt schicken wir noch nach.", "sending_docs"),
+    ("Nous vous envoyons la déclaration de l'expéditeur pour marchandises dangereuses.", "sending_docs"),
 ]
 
 # (text, expected, what the clerk says today, issue)
-REPLIES_KNOWN_WRONG = [
-    # A bare "ok"/"Yes" in reply to a price is a yes in forwarding. Risky? The reply is to OUR quote, in thread, with
-    # nothing else in it: a person would book it. Today it sits in needs_human and the time score runs out.
-    ("ok", "accept", "unclear", 53),
-    ("Yes", "accept", "unclear", 53),
-    (QUOTED + "\nok", "accept", "unclear", 53),                     # bottom-posted "ok"
-    ("Bitte um Buchung.", "accept", "unclear", 53),                 # "Buchung" is not "buchen"
-    ("De acuerdo.", "accept", "unclear", 53),
-    ("Sí, adelante.", "accept", "unclear", 53),
-    # The "but" is in an old story, not in the answer: the answer is "Please go ahead."
-    (LONG_YES_WITH_BUT, "accept", "unclear", 54),
-    ("Thanks, but we decided to go with another forwarder this time.", "decline", "unclear", 55),
-    ("Thanks a lot, we'll pass on this one.", "decline", "unclear", 55),
-    ("È possibile avere un prezzo migliore?", "better_price", "unclear", 57),
-    ("C'est un peu cher, vous pouvez faire mieux ?", "better_price", "unclear", 57),
-    # A real yes, but DG papers follow: we must wait for them, not book now (5U rejects dg_docs_missing).
-    ("Passt, das Sicherheitsdatenblatt schicken wir noch nach.", "sending_docs", "accept", 58),
-    ("Nous vous envoyons la déclaration de l'expéditeur pour marchandises dangereuses.", "sending_docs", "unclear", 59),
-]
+REPLIES_KNOWN_WRONG = []   # all 13 fixed in booking/handlers.py (issues #53, #54, #55, #57, #58, #59), rows moved up
 
 
 # ---------------------------------------------------------------- 2. new mails (20 = 14 right + 6 known wrong)

@@ -255,5 +255,56 @@ class TestAirlineSaysNo(unittest.TestCase):
             self.assertIsNone(AIRLINE_NO.search(t), t)
 
 
+class TestRound5Batch1(unittest.TestCase):
+    """Red-team round 5 batch 1: after-booking mails, out-of-office, only-this-airline."""
+    def _booked(self, tid):
+        from core import db, mailbox
+        from booking import crm
+        m = mailbox.normalize({"id": tid, "from": "sara@lindqvist-medtech.mail", "subject": "Air freight FRA-ORD",
+                               "body": "cheapest FRA to ORD, 540 kg. Please only use Meridian Freightways, our contracted carrier."})
+        db.save_mail(m); db.new_session(m)
+        db.update_session(tid, status="booked", customer="sara@lindqvist-medtech.mail")
+        crm.upsert(tid, customer="sara@lindqvist-medtech.mail", subject="Air freight FRA-ORD", last_customer_mail_id=tid,
+                   airline="Meridian Freightways", origin="FRA", destination="ORD", status="booked", booking_reference="BK-R5B1%04d" % (tid % 10000))
+
+    def _reply(self, tid, n, body):
+        from core import mailbox
+        from booking import handlers
+        handlers.handle_follow_up(mailbox.normalize({"id": tid + n, "from": "sara@lindqvist-medtech.mail", "subject": "Re: Air freight FRA-ORD",
+                                                     "body": body, "in_reply_to": tid, "references": [tid]}))
+
+    def test_cancel_change_complaint_reach_a_human(self):
+        from core import db
+        for i, (body, kind) in enumerate((("Please cancel the booking, our customer cancelled.", "CANCELLATION"),
+                                          ("The goods will only be ready on 2026-11-28, please adjust.", "CHANGE"),
+                                          ("The truck did not show up today!", "COMPLAINT"))):
+            tid = 9840000 + i * 10
+            self._booked(tid)
+            self._reply(tid, 1, body)
+            s = db.session(tid)
+            self.assertEqual(s["status"], "needs_human")
+            self.assertIn(kind, s["note"])
+            acks = list(db.con().execute("SELECT data FROM events WHERE thread_id=? AND kind LIKE 'mail_out%'", (tid,)))
+            self.assertEqual(len(acks), 1)                                   # the customer is not left in silence
+
+    def test_thank_you_after_booking_is_quiet(self):
+        from core import db
+        tid = 9840100
+        self._booked(tid)
+        self._reply(tid, 1, "Dear Ms Hofmann, thank you for confirming the booking for our shipment to ORD. Kind regards, Sara")
+        self.assertEqual(db.session(tid)["status"], "booked")
+
+    def test_out_of_office(self):
+        from booking.handlers import classify
+        self.assertEqual(classify("I am out of the office until Monday with limited access to e-mail."), "auto_reply")
+
+    def test_only_this_airline(self):
+        tid = 9840200
+        self._booked(tid)
+        self.assertEqual(main.required_airlines(tid), {"Meridian Freightways"})
+        opts = [{"airline": "Yellowtail Air Freight", "total_eur": "1300"}, {"airline": "Meridian Freightways", "total_eur": "1500"}]
+        self.assertEqual([x["airline"] for x in main.keep_required(tid, opts)], ["Meridian Freightways"])
+
+
 if __name__ == "__main__":
     unittest.main()

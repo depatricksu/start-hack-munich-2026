@@ -285,6 +285,40 @@ def excluded_airlines(tid):
     return out
 
 
+_ONLY = re.compile(r"\b(?:only (?:use|with|via|book|fly|offer|quote)|exclusively|must (?:be|fly with|go with)|contracted carrier|"
+                   r"our (?:contract|framework|preferred) (?:carrier|airline)|nur (?:mit|über)|ausschlie(?:ß|ss)lich|"
+                   r"solo con|uniquement (?:avec|par))\b", re.I)
+
+
+def required_airlines(tid):
+    """'Please only use Meridian Freightways, it is our contracted carrier': the mirror of an excluded airline.
+    Read from the request thread only (a carrier wish is per shipment)."""
+    s = db.session(tid) or {}
+    sender = (s.get("customer") or "").lower()
+    text = "\n".join("%s\n%s" % (r["subject"] or "", re.split(r"\n\s*(?:>|On .+wrote:|Am .+schrieb)", r["body"] or "")[0])
+                     for r in db.con().execute("SELECT subject, body FROM mails WHERE thread_id=? AND sender=?", (tid, sender)))
+    out = set()
+    for sentence in re.split(r"(?<=[.!?])\s+|\n", text):
+        if not _ONLY.search(sentence) or _NO.search(sentence):
+            continue
+        low = sentence.lower()
+        for name in _airline_names():
+            first = name.split()[0]
+            if name.lower() in low or (len(first) >= 5 and re.search(r"\b%s\b" % re.escape(first.lower()), low)):
+                out.add(name)
+    return out
+
+
+def keep_required(tid, options):
+    """Only the airline(s) the customer asked for. No price from them -> [] (a human asks that airline)."""
+    want = {n.lower() for n in required_airlines(tid)}
+    if not want:
+        return options
+    keep = [x for x in options if str(x.get("airline") or "").lower() in want]
+    db.event("airline_required", tid, required=sorted(want), kept=len(keep), dropped=len(options) - len(keep))
+    return keep
+
+
 def drop_excluded(tid, options):
     """Never quote an airline the customer excluded. None left -> [] (finalize hands it to a human)."""
     banned = {n.lower() for n in excluded_airlines(tid)}
@@ -339,6 +373,10 @@ def finalize(tid):
     options = drop_excluded(tid, options)                    # "please do not offer Zephyr (ZS)": never quote it
     if not options:
         return needs_human(tid, None, "customer excluded every airline we have a price from")
+    options = keep_required(tid, options)                    # "please only use Meridian": only that airline
+    if not options:
+        return needs_human(tid, None, "customer wants only %s, we have no price from them: ask that airline" %
+                           ", ".join(sorted(required_airlines(tid))))
     options = drop_price_outliers(tid, options)              # a misread bid (per-kg as total, x1000) never wins
     options, too_late = by_deadline(tid, options, fields)    # "must arrive by <date>": drop flights that land late
     if fields.get("prefer") == "fastest" or too_late:

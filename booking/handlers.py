@@ -40,6 +40,8 @@ ACCEPT = re.compile(r"\b(accept\w*|book (it|this|that|the)|please book|go ahead|
                    r"yes,? (?:please|that works|we agree|go)|machen wir so|alles klar|in ordnung|va bene|procedete|procedi|"
                     r"bestätig\w*|d'accord|réserv\w*|acepto|reserv\w*|confermo|prenot\w*)", re.I)
 DECLINE = re.compile(r"\b(no,? thanks?|decline\w*|not interested|cancel\w*|we pass|found another|went with another|"
+                     r"(?:go|going|decided to go) with (?:another|a different) (?:forwarder|provider|agent|company|offer)|"
+                     r"(?:we'?ll|we will|we'?re going to) pass|pass on this|"
                      r"nein|kein interesse|absagen|storn\w*|anderen anbieter|non merci|no gracias)\b", re.I)
 # A negated "go ahead / proceed / book" is a DECLINE, not an accept (live bug: "we will not go ahead" was booked).
 NEGATED_PROCEED = re.compile(r"\b(won'?t|will not|would not|do(es)?\s*n'?t|did\s*n'?t|cannot|can'?t|"
@@ -57,7 +59,8 @@ HEDGE = re.compile(r"\b(yet|still|for now|at the moment|right now|checking|revie
 PRICE = re.compile(r"\b(cheaper|better price|best price|lower( the)? price|discount|too expensive|too high|negotiat\w*|"
                    r"budget|match|günstiger|rabatt|zu teuer|preis\w* (senken|nachlass|verhandeln)|moins cher|"
                    r"do (?:any |a bit |a little )?better|better (?:offer|rate|deal)|lower (?:rate|offer)|"
-                   r"más barato|descuento|sconto)\b", re.I)
+                   r"más barato|descuento|sconto|prezzo migliore|più economico|meno caro|troppo caro|faire mieux|"
+                   r"(?:un peu|trop) cher|meilleur prix|mejor precio|demasiado caro)\b", re.I)
 QUESTION = re.compile(r"\?|\b(could you|can you|what about|instead|cheaper|faster|change|könnten sie|anders)\b", re.I)
 BK = re.compile(r"\bBK-[A-Za-z0-9]{6,12}\b")
 TEAM_REF = re.compile(r"\bGOOGLE-\d+\b")
@@ -75,7 +78,8 @@ NEW_FACTS = re.compile(r"\d[\d.,]*\s*(kg|kgs|lbs?|t\b|tons?|tonnen|cbm|m3|m³|eu
 # not declining and not a clear yes. Acknowledge and await the papers instead of handing it to a human.
 _DOCS = (r"(shipper'?s? declaration|safety data sheet|\bmsds\b|\bsds\b|\bdgd\b|dangerous goods?[^.?!]{0,20}"
          r"(document|paper|declaration|sheet)|gefahrgut\w*[^.?!]{0,20}(dokument|papier|erkl[aä]rung)|"
-         r"document\w*[^.?!]{0,20}(marchandises dangereuses|peligros))")
+         r"document\w*[^.?!]{0,20}(marchandises dangereuses|peligros)|d[ée]claration[^.?!]{0,40}marchandises dangereuses|"
+         r"fiche de donn[ée]es de s[ée]curit[ée]|sicherheitsdatenbl[aä]tt\w*)")
 _SEND = (r"(send|provide|forward|share|supply|pass (?:it |them |you )?along|get (?:you |it )?|"
          r"senden|schicken|nachreich\w*|zusenden|zukommen|envoy\w*|enviar\w*|invi\w*)")
 SENDING_DOCS = re.compile(_SEND + r"[^.?!]{0,60}?" + _DOCS + r"|" + _DOCS + r"[^.?!]{0,60}?" + _SEND, re.I)
@@ -102,15 +106,48 @@ def own_text(body, subject=""):
     return re.sub(r"^\s*((re|aw|fwd?|wg)\s*:\s*)+", "", subject or "", flags=re.I).strip()
 
 
+SHORT_YES = re.compile(r"^\W*(?:ok(?:ay)?|yes|yep|yeah|ja|jawohl|s[ií]|oui|d'accord|de acuerdo|claro|perfecto|perfect|"
+                       r"great|super|top|fine|bitte um buchung|buchung bitte)\b[\s,.!]*(?:(?:please|pls|bitte|thanks|thank you|"
+                       r"danke|merci|gracias|grazie|adelante|go ahead|book it|buchen)\b[\s,.!]*)*$", re.I)
+AUTO_REPLY = re.compile(r"\b(out of (?:the )?office|automatic reply|auto-?reply|autoreply|abwesenheitsnotiz|"
+                        r"bin (?:bis|vom) [^.\n]{0,40}(?:nicht im b[üu]ro|abwesend)|absent until|on (?:annual )?leave until|"
+                        r"limited access to e-?mail|r[ée]ponse automatique|fuera de la oficina|fuori ufficio)\b", re.I)
+_SIG_LINE = re.compile(r"^(?:[A-ZÄÖÜ][\w.'-]+(?: [A-ZÄÖÜ][\w.'-]+){0,2}|(?:best |kind |many )?(?:regards|thanks|cheers|grüße|gruß|"
+                       r"saludos|saluti|cordialement)[\w ,.!]*)$", re.I)
+
+
+def _answer_lines(text):
+    """The customer's answer without a trailing name / sign-off line ('ok\nSara' -> 'ok')."""
+    lines = [l.strip() for l in (text or "").splitlines() if l.strip()]
+    while len(lines) > 1 and _SIG_LINE.match(lines[-1]):
+        lines.pop()
+    return "\n".join(lines)
+
+
+def _last_sentence(text):
+    parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+|\n", _answer_lines(text)) if p.strip()]
+    return parts[-1] if parts else ""
+
+
 def classify(body, subject=""):
     """accept / decline / better_price / faster / sending_docs / unclear. Only the customer's new text counts."""
     # "so we won\u2019t go ahead" (typographic apostrophe) was read as "go ahead" = yes and BOOKED (live, round 72)
     text = own_text(body, subject).replace("\u2019", "'").replace("\u2018", "'").replace("\u02bc", "'").replace("`", "'")
     if DECLINE.search(text) or NEGATED_ROMANCE.search(text) or (NEGATED_PROCEED.search(text) and not HEDGE.search(text)):   # definitive "won't proceed" = decline; "not yet" = wait (unclear)
         return "decline"
+    if AUTO_REPLY.search(text):                # an out-of-office robot is no answer: the quote stays open
+        return "auto_reply"
     if PRICE.search(text):
         return "better_price"
+    if SENDING_DOCS.search(text):              # "Passt, das Sicherheitsdatenblatt schicken wir nach": a yes, papers follow (#58)
+        return "sending_docs"
     if ACCEPT.search(text) and not QUESTION.search(text) and not CONDITION.search(text) and not NEW_FACTS.search(text):
+        return "accept"
+    if SHORT_YES.match(_answer_lines(text)):  # a bare "ok" / "Yes" / "De acuerdo" to OUR quote is a yes (#53)
+        return "accept"
+    last = _last_sentence(text)                # the answer is the last sentence; a "but" in an old story does not count (#54)
+    if last and ACCEPT.search(last) and not QUESTION.search(last) and not CONDITION.search(last) and not NEW_FACTS.search(last) \
+            and not QUESTION.search(text):
         return "accept"
     if FASTER.search(text) and not ACCEPT.search(text):
         return "faster"
@@ -294,6 +331,45 @@ def chosen_from_reply(s):
 
 
 UNCLEAR_NOTE = "customer answered the quote, not a clear yes or no"
+AFTER_BOOKING = ("booking", "booked", "booking_requested", "confirmed")
+_THANKS_ONLY = re.compile(r"^\W*(?:(?:many |thank you|thanks|danke|vielen dank|merci|grazie|gracias|perfect|great|super|"
+                          r"ok|noted|received|erhalten|top|wonderful|excellent)[\w\s,.!']{0,60})$", re.I)
+POST_BOOKING = [   # (kind, rule): what a customer writes after the booking that a forwarder must act on
+    ("cancellation", re.compile(r"\b(cancel\w*|storn\w*|annul\w*|call (?:it )?off|no longer needed|nicht mehr ben[öo]tigt)\b", re.I)),
+    ("complaint", re.compile(r"\b(did ?n[o']t (?:show|arrive|come|turn up)|not (?:shown|arrived|picked up)|no(?:body| one) came|"
+                             r"where is (?:the|our|my)|still waiting|damaged|broken|missing|complain\w*|unacceptable|"
+                             r"nicht (?:gekommen|abgeholt|erschienen)|beschädigt|reklamation|beschwerde)\b", re.I)),
+    ("change", re.compile(r"\b(change|changed|instead|new (?:date|address|pickup|weight)|postpone\w*|delay\w*|moved?|"
+                          r"only (?:be )?ready on|not ready|verschieb\w*|änder\w*|neue[rs]? (?:termin|datum|adresse)|"
+                          r"\d+\s*(?:kg|cbm|m3|pallets?|pieces)|20\d\d-\d\d-\d\d)\b", re.I)),
+]
+ACK_AFTER = {
+    "en": "Hi,\n\nthank you, noted. I have passed this straight to my colleague handling your booking%s, and we will get back "
+          "to you shortly.\n\nBest regards\n%s\nAir Export",
+    "de": "Hallo,\n\nvielen Dank, ist notiert. Ich habe das direkt an meinen Kollegen gegeben, der Ihre Buchung betreut%s, wir "
+          "melden uns in Kürze.\n\nViele Grüße\n%s\nLuftfracht Export",
+}
+
+
+def after_booking(s, mail):
+    """A customer mail after the booking: a 'thank you' needs nothing; an auto-reply is ignored; a cancellation, a new
+    date / address / weight or a complaint goes to a human at once (red, with the reason) and the customer gets a short
+    acknowledgement instead of silence (red-team round 5: all three were dropped as follow_up_ignored)."""
+    tid = s["thread_id"]
+    text = own_text(mail["body"], mail.get("subject"))
+    if AUTO_REPLY.search(text):
+        return db.event("after_booking_auto_reply", tid, mail["id"])
+    kind = next((k for k, rx in POST_BOOKING if rx.search(text)), None)
+    if not kind:
+        return db.event("follow_up_ignored", tid, mail["id"], status=s["status"],
+                        why="thanks" if _THANKS_ONLY.match(_answer_lines(text)) else "nothing to act on")
+    db.update_session(tid, status="needs_human", note="AFTER BOOKING, customer %s: %s" % (kind.upper(), text.replace("\n", " ")[:300]))
+    db.event("after_booking_" + kind, tid, mail["id"], was=s["status"])
+    from llm.extract import SIGNER
+    b = crm.get(tid) or {}
+    lang = "de" if (b.get("language") or "").lower().startswith("de") else "en"
+    ref = b.get("booking_reference") or crm.team_reference(tid)
+    _reply_session(s, mail, ACK_AFTER[lang] % ((" (%s)" % ref) if ref else "", SIGNER), "after_booking_" + kind)
 
 
 def handle_faster(s, mail):
@@ -429,12 +505,16 @@ def handle_follow_up(mail):
         db.update_session(tid, status="quoted", note="customer wrote again after an unclear reply")
     if s and s["status"] == "reprice_proposed" and mail["sender"] == (s["customer"] or "").lower():
         return reprice_answer(s, mail)                           # yes or no to the airline's new price
+    if s and s["status"] in AFTER_BOOKING and mail["sender"] == (s["customer"] or "").lower():
+        return after_booking(s, mail)                            # cancel / new date / complaint: never silently dropped
     if not s or s["status"] not in ("quoted", "meeting_proposed", "awaiting_docs"):
         return db.event("follow_up_ignored", tid, mail["id"], status=s and s["status"])
     if mail["sender"] != (s["customer"] or "").lower():          # only the customer who asked can book on this quote
         return _needs_human(tid, mail["id"], "reply from %s, not from the customer %s" % (mail["sender"], s["customer"]))
     verdict = classify(mail["body"], mail.get("subject"))
     db.event("follow_up", tid, mail["id"], verdict=verdict, status=s["status"])
+    if verdict == "auto_reply":                                  # out-of-office robot: no alarm, the quote stays open
+        return None
     if s["status"] == "meeting_proposed" and verdict != "decline":   # "Tue 10:00, please confirm" is not a booking
         return _needs_human(tid, mail["id"], "customer answered our call offer (picked a time?): forwarder to follow up")
     if verdict == "decline":
