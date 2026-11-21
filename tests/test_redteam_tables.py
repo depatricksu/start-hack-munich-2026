@@ -131,7 +131,7 @@ MAILS_KNOWN_WRONG = [
        "Engine to Mexico"), "rfq", "spam", 63),
 ]
 
-# ---------------------------------------------------------------- 3. dangerous goods (30 = 21 right + 9 known wrong)
+# ---------------------------------------------------------------- 3. dangerous goods (30, all right after the #64-#69 fixes)
 DG = [
     ("Commodity: perfume, 120 bottles of eau de parfum", True),     # UN1266 class 3
     ("Power banks 10000 mAh, 200 pcs", True),                       # UN3480
@@ -154,20 +154,18 @@ DG = [
     ("Empty aerosol cans (unfilled), 1000 pcs", False),
     ("Fragrance-free soap, 80 cartons", False),
     ("Alkaline AA batteries, 100 boxes", False),                    # not restricted (special provision A123)
+    ("Commodity: eau de parfum in 50 ml glass bottles", True),   # was wrong, fixed (#64) # perfume without the word
+    ("Solvent-based industrial paint, flash point 23 C, 12 drums", True),   # was wrong, fixed (#65) # UN1263 class 3
+    ("Farbe auf Lösemittelbasis, 8 Fässer", True),   # was wrong, fixed (#65) # same, in German
+    ("Parfüm, 30 Kartons", True),   # was wrong, fixed (#66) # German words missing
+    ("Nagellack, 200 Flaschen", True),   # was wrong, fixed (#66)
+    ("Feuerzeuge, 10 Kartons", True),   # was wrong, fixed (#66) # lighters, UN1057
+    ("Hand sanitizer gel, 70% alcohol, 60 cartons", True),   # was wrong, fixed (#67) # UN1170 class 3
+    ("Car batteries, wet, filled with acid", True),   # was wrong, fixed (#68) # UN2794 class 8
+    ("Perfume bottle caps, plastic, 5000 pcs", False),   # was wrong, fixed (#69)
 ]
 
-DG_KNOWN_WRONG = [
-    ("Commodity: eau de parfum in 50 ml glass bottles", True, False, 64),            # perfume without the word
-    ("Solvent-based industrial paint, flash point 23 C, 12 drums", True, False, 65), # UN1263 class 3
-    ("Farbe auf Lösemittelbasis, 8 Fässer", True, False, 65),                        # same, in German
-    ("Parfüm, 30 Kartons", True, False, 66),                                         # German words missing
-    ("Nagellack, 200 Flaschen", True, False, 66),
-    ("Feuerzeuge, 10 Kartons", True, False, 66),                                     # lighters, UN1057
-    ("Hand sanitizer gel, 70% alcohol, 60 cartons", True, False, 67),                # UN1170 class 3
-    ("Car batteries, wet, filled with acid", True, False, 68),                       # UN2794 class 8
-    # False positive: caps are plastic, no perfume in them. Asking for DG papers on general cargo costs the round.
-    ("Perfume bottle caps, plastic, 5000 pcs", False, True, 69),
-]
+DG_KNOWN_WRONG = []   # all 9 fixed in dg/quote.py (issues #64-#69)
 
 
 class TestReplies(unittest.TestCase):
