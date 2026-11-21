@@ -43,6 +43,10 @@ BID_MAX_WAIT_S = float(os.environ.get("BID_MAX_WAIT_S", "300"))
 # Turn off (0) once we know. See `python -m core.stats`.
 BID_EXPERIMENT = os.environ.get("BID_EXPERIMENT", "1") == "1"
 QUOTE_EUR = os.environ.get("QUOTE_EUR", "1") == "1"        # quote in EUR even if the cheapest flight came in USD
+# Which bid we take among truckers / airline bids. auto = the 5U booth rule (see sourcing/bids.py pick_bid):
+# customer says fast -> fastest, says cheapest -> cheapest, says nothing -> balanced 50/50 price and speed.
+# Override with cheapest | balanced | fastest if the board shows the rule is different.
+BID_PICK = os.environ.get("BID_PICK", "auto").lower()
 # An RFQ older than this is dead (expires after 6 min). We do not answer it, e.g. after a restart.
 RFQ_MAX_AGE_S = float(os.environ.get("RFQ_MAX_AGE_S", "330"))
 CLARIFY = os.environ.get("CLARIFY", "1") == "1"     # ask the customer when only data is missing (Erik, 21 Nov)

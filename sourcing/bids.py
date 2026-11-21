@@ -22,7 +22,7 @@ CARRIERS = list(csv.DictReader(open(os.path.join(_KIT, "carrier-list.csv"))))
 RATEDESK = "ratedesk@hackloop.mail"
 REF = re.compile(r"\bBID-(\d+)\b", re.I)
 EXTRA_COLUMNS = {"email": "TEXT", "role": "TEXT", "required": "INTEGER DEFAULT 1", "status": "TEXT",
-                 "total_eur": "TEXT", "note": "TEXT"}
+                 "total_eur": "TEXT", "note": "TEXT", "hours": "REAL"}
 _ready = False
 
 
@@ -130,7 +130,8 @@ SYSTEM = """You read a carrier's answer to our price request and return JSON onl
  "min_charge": minimum charge if stated, else null,
  "currency": 3-letter currency code, or null,
  "fx_to_eur": how many EUR one unit of that currency is, only if the mail states an exchange rate, else null,
- "transit_days": transit or delivery time in days as a number (same day = 0), or null,
+ "transit_days": transit or delivery time in days as a number if stated in days, else null,
+ "transit_hours": transit or delivery time in hours as a number if stated in hours, else null,
  "airline": airline name if the mail names the airline that would fly, else null,
  "unclear": short note if the answer is a question, conditional, or for a different weight/route, else null
 }
@@ -150,9 +151,11 @@ def read_answer(mail):
     if config.LLM_FAKE:
         m = re.search(r"(\d[\d.,]*)\s*(EUR|USD|CHF|GBP)", text, re.I)
         d = re.search(r"(\d+)\s*(?:days?|tage?)", text, re.I)
+        h = re.search(r"(\d+)\s*(?:hours?|stunden|h\b)", text, re.I)
         declined = bool(re.search(r"\b(cannot|can't|unable|no capacity|decline|leider nicht)\b", text, re.I))
         return {"declined": declined, "total": float(m.group(1).replace(",", "")) if m and not declined else None,
-                "currency": m.group(2).upper() if m else None, "transit_days": int(d.group(1)) if d else None}, None
+                "currency": m.group(2).upper() if m else None, "transit_days": int(d.group(1)) if d else None,
+                "transit_hours": int(h.group(1)) if h else None}, None
     status, data = mailbox.api("POST", "/v1/gateway/chat/completions", timeout=20, body={
         "model": config.LLM_MODEL, "max_completion_tokens": 200, "response_format": {"type": "json_object"},
         "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": text}]})
@@ -171,6 +174,12 @@ def bid_total(form, chargeable_kg):
         freight = max(rate * cw, _num(form.get("min_charge")) or Decimal(0))
         total = freight + (_num(form.get("surcharges_per_kg")) or 0) * cw + (_num(form.get("flat_fees")) or 0)
     return total.quantize(Decimal("0.01")) if total is not None and total > 0 else None
+
+
+def _hours(form):
+    """Transit time in hours, from hours or days. Truckers answer in hours ("29 hours"), airlines in days."""
+    h, d = _num(form.get("transit_hours")), _num(form.get("transit_days"))
+    return float(h) if h is not None else float(d * 24) if d is not None else None
 
 
 def _fx(currency, form, session):
@@ -220,14 +229,16 @@ def on_reply(mail):
               else "no_fx" if fx is None else "ok")
     total_eur = str((total * fx).quantize(Decimal("0.01"))) if status == "ok" else None
     carrier = form.get("airline") if bid["role"] == "ratedesk" and form.get("airline") else bid["carrier"]
-    db.con().execute("UPDATE bids SET replied_at=?, total=?, currency=?, transit_days=?, total_eur=?, status=?, note=?, carrier=?, raw=? WHERE id=?",
-                     (now, str(total) if total is not None else None, currency, form.get("transit_days"), total_eur, status,
+    hours = _hours(form)
+    days = form.get("transit_days") if form.get("transit_days") is not None else (round(hours / 24, 2) if hours is not None else None)
+    db.con().execute("UPDATE bids SET replied_at=?, total=?, currency=?, transit_days=?, hours=?, total_eur=?, status=?, note=?, carrier=?, raw=? WHERE id=?",
+                     (now, str(total) if total is not None else None, currency, days, hours, total_eur, status,
                       form.get("unclear"), carrier, mail["body"][:4000], bid["id"]))
     if cost and session:
         db.update_session(tid, llm_cost_usd=(session.get("llm_cost_usd") or 0) + cost)
     db.event("bid_received", tid, mail["id"], bid_id=bid["id"], carrier=carrier, role=bid["role"], status=status,
              total=str(total) if total is not None else None, currency=currency, total_eur=total_eur,
-             transit_days=form.get("transit_days"), seconds=round(now - bid["requested_at"], 1),
+             transit_days=days, hours=hours, seconds=round(now - bid["requested_at"], 1),
              late=session.get("status") not in ("new", "waiting_bids"), form=form)
 
 
@@ -248,11 +259,33 @@ def must_wait(thread_id):
             or (no_flight and not _usable(thread_id, "airline") and "airline" in open_roles))
 
 
-def best_balanced(options):
-    """5U's rule for carrier bids: price and speed count 50/50. Lower score is better."""
-    pmin = min(Decimal(x["total_eur"]) for x in options)
-    tmin = max(min(x["transit_days"] for x in options), 1)
-    return min(options, key=lambda x: (Decimal(x["total_eur"]) / pmin + Decimal(max(x["transit_days"], 1)) / tmin) / 2)
+def bid_hours(b):
+    """Hours of a bid row. Old rows have only transit_days."""
+    if b.get("hours") is not None:
+        return float(b["hours"])
+    return float(b["transit_days"]) * 24 if b.get("transit_days") is not None else None
+
+
+def pick_bid(bids_, prefer):
+    """Which bid is the right one. Answer from the 5U booth (21 Nov):
+      customer asks for fast            -> the fastest bid (price breaks a tie)
+      customer asks for cheapest        -> the cheapest bid
+      customer states no preference     -> BALANCED: price and speed count 50/50, not simply the cheapest
+    Balanced score = (price / lowest price + time / shortest time) / 2, lowest wins. The exact formula of 5U's
+    scorer is not known: check door-pickup rounds on the board and change it HERE if it is off.
+    BID_PICK=cheapest|balanced|fastest overrides the rule."""
+    mode = config.BID_PICK if config.BID_PICK != "auto" else {"fastest": "fastest", "cheapest": "cheapest"}.get(
+        (prefer or "").lower(), "balanced")
+    price = lambda b: Decimal(b["total_eur"])                      # noqa: E731
+    known = [bid_hours(b) for b in bids_ if bid_hours(b) is not None]
+    if mode == "cheapest" or not known:                            # no speed known at all: price is all we have
+        return min(bids_, key=price), "cheapest" if mode == "cheapest" else "cheapest_no_times"
+    slowest = max(known)
+    hours = lambda b: bid_hours(b) if bid_hours(b) is not None else slowest   # noqa: E731  unknown time = slowest
+    if mode == "fastest":
+        return min(bids_, key=lambda b: (hours(b), price(b))), "fastest"
+    pmin, tmin = min(price(b) for b in bids_), max(min(hours(b) for b in bids_), 1.0)
+    return min(bids_, key=lambda b: (float(price(b) / pmin) + max(hours(b), 1.0) / tmin) / 2), "balanced"
 
 
 def final_options(thread_id, options):
@@ -262,18 +295,25 @@ def final_options(thread_id, options):
         return options
     s = db.session(thread_id)
     fields = json.loads(s["fields"])
-    if not options:                                   # lane priced by bids only: balanced pick among them
-        flights = [{"airline": b["carrier"], "origin": fields.get("origin"), "destination": fields.get("destination"),
-                    "transit_days": int(b["transit_days"]), "currency": b["currency"], "total": b["total"],
-                    "total_eur": b["total_eur"], "source": "bid", "bid_id": b["id"]}
-                   for b in _usable(thread_id, "airline") if b["required"] and b["transit_days"] is not None]
-        options = [best_balanced(flights)] if flights else []
+    prefer = fields.get("prefer")
+    if not options:                                   # lane priced by bids only: pick by the booth rule
+        air = [b for b in _usable(thread_id, "airline") if b["required"]]
+        if air:
+            b, how = pick_bid(air, prefer)
+            db.event("bid_picked", thread_id, role="airline", how=how, carrier=b["carrier"], total_eur=b["total_eur"],
+                     candidates=[[x["carrier"], x["total_eur"], bid_hours(x)] for x in air])
+            days = b["transit_days"] if b["transit_days"] is not None else 0
+            options = [{"airline": b["carrier"], "origin": fields.get("origin"), "destination": fields.get("destination"),
+                        "transit_days": int(-(-float(days) // 1)), "currency": b["currency"], "total": b["total"],
+                        "total_eur": b["total_eur"], "source": "bid", "bid_id": b["id"]}]
     if any(b["role"] == "trucker" for b in bs):       # door pickup: no trucker price means no quote
         trucks = _usable(thread_id, "trucker")
         if not trucks:
             db.event("no_trucker_bid", thread_id, asked=sum(1 for b in bs if b["role"] == "trucker"))
             return []
-        t = min(trucks, key=lambda b: Decimal(b["total_eur"]))
+        t, how = pick_bid(trucks, prefer)
+        db.event("bid_picked", thread_id, role="trucker", how=how, carrier=t["carrier"], total_eur=t["total_eur"],
+                 candidates=[[x["carrier"], x["total_eur"], bid_hours(x)] for x in trucks])
         out = []
         for x in options:
             eur = Decimal(x["total_eur"]) + Decimal(t["total_eur"])

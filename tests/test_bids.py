@@ -12,7 +12,7 @@ from sourcing import bids  # noqa: E402
 _next = [7790000]
 
 
-def rfq(tid, origin, dest, kg, cbm=0.5, postcode=None, prefer="cheapest"):
+def rfq(tid, origin, dest, kg, cbm=0.5, postcode=None, prefer="none"):
     """Start a session as if the gateway call had returned these fields."""
     mail = main.mailbox.normalize({"id": tid, "from": "buyer@acme.mail", "subject": "Quote please",
                                    "body": "%s kg %s to %s" % (kg, origin, dest)})
@@ -110,6 +110,37 @@ class TestBids(unittest.TestCase):
         ev = db.con().execute("SELECT data FROM events WHERE kind='bid_received' AND thread_id=771005").fetchone()
         self.assertTrue(json.loads(ev["data"])["late"])
         self.assertEqual(len(quote(771005)), 1)                                # still exactly one quote
+
+    def _door(self, tid, prefer):
+        """Two truckers: one cheap and slow (100 EUR, 48 hours), one a bit dearer and fast (110 EUR, 24 hours)."""
+        rfq(tid, "MUC", "LAX", 120, 0.9, postcode="80331", prefer=prefer)
+        trucks = [b for b in bids.rows(tid) if b["role"] == "trucker"]
+        answer(trucks[0], "All-in price is 100 EUR. Transit time from pickup: 48 hours")
+        answer(trucks[1], "All-in price is 110 EUR. Transit time from pickup: 24 hours")
+        for t in trucks[2:]:
+            answer(t, "Sorry, no capacity, we cannot quote.")
+        main.tick()
+        s = db.session(tid)
+        self.assertEqual(s["status"], "quoted", s["note"])
+        return json.loads(s["chosen"])["trucker_total"]
+
+    def test_trucker_pick_follows_the_booth_rule(self):
+        self.assertEqual(self._door(7711001, "none"), "110.00")       # no preference: balanced 50/50, not cheapest
+        self.assertEqual(self._door(7711002, "cheapest"), "100.00")   # customer asked for the cheapest
+        self.assertEqual(self._door(7711003, "fastest"), "110.00")    # customer asked for fast
+
+    def test_hours_are_read_and_stored(self):
+        self._door(7711004, "none")
+        hours = sorted(b["hours"] for b in bids.rows(7711004) if b["status"] == "ok")
+        self.assertEqual(hours, [24.0, 48.0])
+        self.assertEqual(bids._hours({"transit_days": 2}), 48.0)
+
+    def test_bid_pick_override(self):
+        old, config.BID_PICK = config.BID_PICK, "cheapest"
+        try:
+            self.assertEqual(self._door(7711005, "none"), "100.00")
+        finally:
+            config.BID_PICK = old
 
     def test_unknown_carrier_mail_is_only_logged(self):
         main.process(main.mailbox.normalize({"id": 7780001, "from": "cobalt-skylift@hackloop.mail", "in_reply_to": 1,

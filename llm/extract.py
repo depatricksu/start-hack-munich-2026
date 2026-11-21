@@ -17,7 +17,7 @@ SYSTEM = """You work at an air freight forwarder in Germany. Read the customer's
  "weight_kg": total gross weight in kg if stated as a total, else null,
  "volume_cbm": total volume in cubic meters if stated directly, else null,
  "pieces": [{"count": n, "l_cm": n, "w_cm": n, "h_cm": n, "kg_each": n or null}] if dimensions are given, else [],
- "prefer": "fastest" if the customer asks for the fastest/most urgent option, else "cheapest",
+ "prefer": "fastest" if the customer asks for the fastest/most urgent option, "cheapest" if they ask for the cheapest/lowest price, else "none",
  "kind": "new_request" if the customer asks for a price for a shipment, "accept" if they accept an offer, "question" if they only ask something, else "other",
  "multi_shipment": true if the email asks prices for more than one separate shipment (different routes or separate consignments), else false,
  "shipments": if multi_shipment is true, one object per shipment with the same keys as above: [{"origin", "destination", "pickup_postcode", "weight_kg", "volume_cbm", "pieces", "prefer"}], else [],
