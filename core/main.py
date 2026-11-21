@@ -423,25 +423,35 @@ def run():
     db.set_state("supervised", "1" if safety.SUPERVISED else "0")
     db.event("start", dry_run=config.DRY_RUN, since_id=since, model=config.LLM_MODEL, bid_wait_s=config.BID_WAIT_S,
              commit=commit, supervised=safety.SUPERVISED)
+    next_poll = 0.0
     while True:
+        now = time.time()
+        if now >= next_poll:                                 # 5U allows one poll per 5 s per team key
+            next_poll = now + config.POLL_S
+            try:
+                mails, nxt = mailbox.poll(since)
+                for m in mails:
+                    process(m)
+                    since = max(since, m["id"])
+                    db.set_state("since_id", since)
+                if nxt > since:
+                    since = nxt
+                    db.set_state("since_id", since)
+            except mailbox.RateLimited as e:                 # too early: wait what 5U asks, never hammer
+                next_poll = time.time() + max(e.retry_after, config.POLL_S)
+                db.event("poll_rate_limited", retry_after=e.retry_after)
+            except Exception as e:                           # network hiccup: log and keep going
+                db.event("loop_error", error=str(e))
         try:
-            mails, nxt = mailbox.poll(since)
-            for m in mails:
-                process(m)
-                since = max(since, m["id"])
-                db.set_state("since_id", since)
-            if nxt > since:
-                since = nxt
-                db.set_state("since_id", since)
-            tick()
+            tick()                                           # bid waits and quotes run every TICK_S, not per poll
             actions.tick()                                   # human replies from the UI (actions/queue.py)
             db.set_state("heartbeat", time.time())           # the UI can show "clerk alive" from this
-        except Exception as e:                               # network hiccup: log and keep going
+        except Exception as e:
             db.event("loop_error", error=str(e))
         if safety.restart_wanted():                          # asked by `python3 -m core.restart`, between two turns
             db.event("restart", commit=commit)
             sys.exit(0)                                      # core/supervise.py starts the new code
-        time.sleep(config.POLL_S)
+        time.sleep(config.TICK_S)
 
 
 def run_fake(path):

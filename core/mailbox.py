@@ -56,9 +56,17 @@ def normalize(raw):
     }
 
 
+class RateLimited(Exception):
+    def __init__(self, retry_after):
+        super().__init__("poll rate limited, retry after %.1f s" % retry_after)
+        self.retry_after = retry_after
+
+
 def poll(since_id):
     """New mails after since_id, oldest first. Returns (mails, next_since_id)."""
     status, data = api("GET", "/v1/mailbox/messages", params={"since_id": since_id, "limit": 200})
+    if status == 429:                                # 5U: one poll per 5 s per key; wait what they ask
+        raise RateLimited(float((data or {}).get("retry_after", 5)) if isinstance(data, dict) else 5.0)
     if status != 200:
         raise RuntimeError("poll failed %s: %s" % (status, str(data)[:200]))
     items = data.get("messages") or data.get("items") or data.get("data") or [] if isinstance(data, dict) else data

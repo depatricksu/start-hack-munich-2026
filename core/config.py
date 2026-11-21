@@ -29,7 +29,10 @@ LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4o-mini")   # check GET /v1/gateway
 LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "700"))   # 400 truncated the JSON on a 2-lot mail (live crash 21 Nov 16:46)
 
 DB_PATH = os.environ.get("DB_PATH", os.path.join(ROOT, "data", "forwarder.db"))
-POLL_S = float(os.environ.get("POLL_S", "1.5"))
+# 5U (20:30): one mailbox poll every 5 s per team key, faster gets 429. Poll at 5.2 s, run the clerk's own work
+# (bid waits, quotes, UI actions) every TICK_S in between, so a quote is never held up by the poll limit.
+POLL_S = max(5.2, float(os.environ.get("POLL_S", "5.2")))
+TICK_S = float(os.environ.get("TICK_S", "1.0"))
 
 # How long we wait for carrier/trucker bids, counted from RFQ arrival, before we quote with what we have.
 # 90 is a START VALUE, NOT SETTLED. Calibrate with real data: `python -m core.stats` shows how fast bids
