@@ -71,6 +71,12 @@ def handle_rfq(mail):
     if not fields.get("origin") and postcode[:2] in ZONE_AIRPORT:
         fields["origin"] = ZONE_AIRPORT[postcode[:2]]
     weight, volume = shipment(fields)
+    diff = dg.compare(dict(fields, weight_kg_total=weight, volume_cbm_total=volume), mail)   # attachment vs mail (Riky)
+    if diff:
+        db.event("attachment_mismatch", tid, mail["id"], diff=diff, override=dg.override())
+        if dg.override():
+            weight = diff.get("gross_kg", {}).get("attachment", weight)
+            volume = diff.get("volume_cbm", {}).get("attachment", volume)
     fields["weight_kg_total"], fields["volume_cbm_total"] = weight, volume
     db.update_session(tid, fields=fields, reply_template=fields.get("reply") or "", llm_cost_usd=usage.get("cost_usd"))
     price_and_quote(tid, mail, fields)
