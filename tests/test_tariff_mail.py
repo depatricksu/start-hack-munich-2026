@@ -95,5 +95,28 @@ class TestTariffMail(unittest.TestCase):
         self.assertEqual(ev[-1][0], "tariff_loaded", ev)
 
 
+class TestTariffTraps(unittest.TestCase):
+    """Red-team round 3 (21 Nov ~19:40)."""
+    setUp = TestTariffMail.setUp
+    def test_partial_update_keeps_the_other_lanes(self):
+        keep = [l for l in TXT.splitlines() if not (len(l) > 7 and l[3] == "-" and l[:7].replace("-", "").isalpha()
+                                                    and l[:7].isupper() and not l.startswith("MUC-LAX"))]
+        new = "\n".join(keep).replace("EUR 3.12  EUR 2.28  EUR 1.73  EUR 1.40", "EUR 3.50  EUR 2.60  EUR 1.95  EUR 1.60")
+        before = len(price.lanes_of("Yellowtail Air Freight"))
+        old_total = yt_total()
+        ev = send(9701, YT, [{"filename": "update.txt", "content_type": "text/plain", "content_base64": b64(new)}])
+        self.assertIn("tariff_loaded", [k for k, _ in ev])
+        self.assertEqual(len(price.lanes_of("Yellowtail Air Freight")), before)      # nothing deleted
+        self.assertNotEqual(yt_total(), old_total)                                    # MUC-LAX updated
+
+    def test_usd_tariff_is_not_applied_as_eur(self):
+        usd = TXT.replace("Currency    EUR", "Currency    USD").replace("EUR 3.12", "USD 3.12")
+        old_total = yt_total()
+        ev = send(9702, YT, [{"filename": "usd.txt", "content_type": "text/plain", "content_base64": b64(usd)}])
+        self.assertIn("tariff_rejected", [k for k, _ in ev])
+        self.assertTrue(any("USD" in str(d.get("why")) for k, d in ev if k == "tariff_rejected"))
+        self.assertEqual(yt_total(), old_total)
+
+
 if __name__ == "__main__":
     unittest.main()

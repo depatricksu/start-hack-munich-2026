@@ -65,11 +65,27 @@ def validity(path):
     return got.get("from"), got.get("to")
 
 
+def currency(path):
+    """The sheet's currency from its header ('Currency  USD') or its price cells; None if it does not say."""
+    for row in parse_tariffs.load_rows(path)[:40]:
+        text = " ".join(str(c) for c in row if str(c).strip())
+        m = re.match(r"currency\s*:?\s*([A-Z]{3})\b", text, re.I)
+        if m:
+            return m.group(1).upper()
+        m = re.search(r"\b(USD|GBP|CHF|CNY|JPY)\s*\d|\$\s*\d", text)
+        if m:
+            return (m.group(1) or "USD").upper()
+    return None
+
+
 def check(records, sender_airline, path, today=None):
     """-> list of problems; empty means safe to apply."""
     today = today or dt.date.today()
     if not records:
         return ["no lanes found in %s" % os.path.basename(path)]
+    cur = currency(path)
+    if cur and cur != "EUR":                                 # the parser stores every price as EUR: never relabel USD
+        return ["prices in %s, not EUR (a human converts, nothing applied)" % cur]
     problems = parse_tariffs.check(records)
     names = {r["airline"] for r in records}
     if len(names) != 1:
@@ -137,10 +153,15 @@ def handle(mail):
                      lanes=len(records), why=problems[:10])
             continue
         airline = records[0]["airline"]
+        current = price.lanes_of(airline)
+        partial = bool(current) and len(records) * 2 < len(current)
+        if partial:                                          # "new rates for FRA-ORD": update those lanes, keep the rest
+            new = {(r["origin"], r["destination"]) for r in records}
+            records = [r for r in current if (r["origin"], r["destination"]) not in new] + records
         diff = _diff(airline, records)
         price.replace_airline(airline, records)
         applied += 1
         db.event("tariff_loaded", tid, mail["id"], airline=airline, file=os.path.basename(path), lanes=len(records),
-                 **diff)
+                 partial=partial, **diff)
     if not applied:
         db.event("tariff_not_applied", tid, mail["id"], airline=sender_airline, files=len(files))
