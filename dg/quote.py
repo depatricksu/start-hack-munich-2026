@@ -120,6 +120,9 @@ def infer_commodity_dg(text):
     if not text:
         return None
     cargo = _cargo_text(text)
+    # "Cologne, Germany" is one of our six departure cities, not a perfume: round 72 (automotive sensors, pickup in
+    # Cologne) went out with a dangerous goods paragraph. The city has a capital C; "eau de Cologne" stays a match.
+    cargo = re.sub(r"(?<![Ee]au de )(?<![Ee]au-de-)\bCologne\b", " ", cargo)
     m = _first_real(INHERENT_DG, cargo) or (None if NOT_DG.search(cargo) else _first_real(COMMODITY_DG, cargo))
     if not m:
         return None

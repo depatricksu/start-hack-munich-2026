@@ -75,11 +75,40 @@ def poll(since_id):
     return mails, nxt if nxt is not None else max([m["id"] for m in mails] + [since_id])
 
 
+def in_customer_language(to, body, thread_id, event="mail_out"):
+    """5U 23:00 (21 Nov): a reply that is not in the customer's language is rejected (wrong_language). For a customer
+    whose language we have no own texts for, every mail to them is translated here, as a whole, right before it goes
+    out (llm/translate.py). Mails to carriers and customers we can write to ourselves pass through unchanged. Any
+    problem -> the English mail goes out as before, and the event log says why."""
+    if event != "mail_out" or not thread_id:
+        return body
+    try:
+        s = db.session(thread_id)
+        if not s or (s.get("customer") or "").lower() != (to or "").lower():
+            return body
+        lang = (json.loads(s.get("fields") or "{}").get("language") or "").lower()[:2]
+        from llm import translate                             # late import: llm imports this module
+        if not translate.needed(lang):
+            return body
+        text, info = translate.to(body, lang)
+        if not text:
+            db.event("translate_failed", thread_id, lang=lang, why=info)
+            return body
+        db.event("translated", thread_id, lang=lang, cost_usd=info, english=body)
+        if info:
+            db.update_session(thread_id, llm_cost_usd=(s.get("llm_cost_usd") or 0) + info)
+        return text
+    except Exception as e:
+        db.event("translate_failed", thread_id, why="error: %s" % str(e)[:200])
+        return body
+
+
 def send(to, subject, body, in_reply_to=None, thread_id=None, event="mail_out"):
     """Send a mail. With DRY_RUN=1 it is only logged. Returns True if sent (or dry run).
 
     event: name of the log entry. Customer mails are "mail_out"; bid requests to carriers use "bid_mail_out",
     so "mails we sent the customer" stays easy to count."""
+    body = in_customer_language(to, body, thread_id, event)
     if config.DRY_RUN:
         db.event(event + "_dry_run", thread_id, in_reply_to, to=to, subject=subject, body=body)
         return True
