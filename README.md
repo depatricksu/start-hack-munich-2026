@@ -21,15 +21,32 @@ Key info collected from the event Discord on Sat 21 Nov 2026.
 | Sun 15:30 | Closing ceremony |
 | Sun 23:59 | Redeem OpenAI vouchers |
 
-## Challenges
+## Our track: 5U AI · "Build the Forwarder"
+
+- **Room:** 1180 · **Discord:** #5u-ai · booth on site for questions
+- **Task:** be an AI freight forwarder. One mailbox, a new request every ~6 minutes, in any language. The agent must:
+  1. read every mail (any language),
+  2. price every request,
+  3. answer it,
+  4. escalate the judgement calls to a human.
+- The industry "changes by the hour" → expect rule/price updates during the hack.
+- **Pitch:** every team pitches to 5U at the end for the top 3 prizes.
+- **Prize:** fly a real plane yourself ✈️ + €300 / €200 / €100 from START Munich for the top 3.
+- **Material:** 5U AI pitch slides (guidebook → Challenges) and deep-dive PDF in #5u-ai. Full brief in the Hack League app.
+
+### Agent plan (draft)
+- Loop: poll mailbox → classify + extract (origin, destination, cargo, weight/volume, dates, incoterms) → price → draft reply → send or escalate.
+- Escalate when: missing data, unusual cargo (dangerous goods, oversize), low confidence, price outside normal range.
+- Demo UI: live inbox on the left, agent reasoning + action on the right, human review queue.
+- Models: Claude Sonnet for decisions/replies, Haiku for classification/translation (high volume).
+
+## Other challenges (for reference)
 
 | Partner | Room | Notes |
 |---|---|---|
-| **QuantCo** – "Claim to Fame" | 1200 | Score: 70 % leaderboard, 30 % approach + presentation. **Do not put the challenge or your code in a public repo.** Deep-dive PDF in #quantco. |
-| **Lio** – "Keep the Line Running" | 1100 | Supplier portal: https://start-hack-portal-cxh3crbdaef2f8gt.westeurope-01.azurewebsites.net/ (data published at challenge start). Brief, judging, deep-dive PDFs in #lio. |
-| **Feyer** | 0602 | Repo: https://github.com/feyerlabs/start-hack-munich-2026 |
-| **revel8** – "Agentic Social Engineer" | 0606 | Challenge + scoring rubric PDFs in #revel8. Per-team Persona API key after allocation. |
-| **5U AI** | 1180 | Every team pitches at the end for the top 3 prizes. Slides in #5u-ai; booth for questions. |
+| **QuantCo** – "Claim to Fame" | 1200 | Live insurance-pricing game. 70 % leaderboard, 30 % approach + presentation. |
+| **Feyer** – "Faster Physics" | 0602 | Speed up a JAX optical simulator. Repo: https://github.com/feyerlabs/start-hack-munich-2026 |
+| **revel8** – "Agentic Social Engineer" | 0606 | Agent wins over AI twins via revel8's API. |
 
 ## Free compute
 
