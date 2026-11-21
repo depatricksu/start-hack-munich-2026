@@ -87,20 +87,35 @@ SENDING_DOCS = re.compile(_SEND + r"[^.?!]{0,60}?" + _DOCS + r"|" + _DOCS + r"[^
 
 FASTER = re.compile(r"\b(faster|quicker|sooner|earlier|express|speed (it )?up|schneller|früher|eiliger|più veloce|plus rapide|"
                     r"más rápido)\b", re.I)
-_QUOTED_START = re.compile(r"\n\s*(?:>|On .+wrote:|Am .+schrieb)")
+_QUOTED_START = re.compile(r"\n\s*(?:>|On .+wrote:|Am .+schrieb|Le .+a [ée]crit|El .+escribi[óo]|Il .+ha scritto|"
+                           r"-{3,}\s*(?:Original Message|Urspr[üu]ngliche Nachricht|Message d'origine|Messaggio originale|"
+                           r"Mensaje original)[^\n]*|_{8,}|(?:From|Von|De|Da):[^\n]*\n\s*(?:Sent|Date|Gesendet|Datum|Envoy[ée]|"
+                           r"Enviado|Inviato|To|An):)", re.I)
+_REPLY_MARK = re.compile(r"\n\s*(?:>|On .+wrote:|Am .+schrieb)")       # quote styles where a bottom-posted answer is possible
+_SIG_START = re.compile(r"\n\s*--\s*\n|\n\s*-{2,}\s*$", re.M)
+DISCLAIMER = re.compile(r"[^.!?\n]*\b(confidential|intended recipient|disclaimer|liability|virus(?:es)?|environment before printing|"
+                        r"general terms|terms and conditions|registered (?:office|in)|managing director|gesch[äa]ftsf[üu]hr\w*|"
+                        r"amtsgericht|handelsregister|\bHRB\b|vertraulich|haftung|datenschutz|privacy|unsubscribe)\b[^.!?\n]*[.!?]?", re.I)
+
+
+def _strip_footer(text):
+    """Cut the signature block ('-- ') and drop disclaimer sentences ('We accept no liability for viruses'): a
+    footer is not the customer's answer (red-team round 7: it read as a yes and BOOKED)."""
+    text = _SIG_START.split("\n" + (text or ""), maxsplit=1)[0]
+    return DISCLAIMER.sub(" ", text).strip()
 
 
 def own_text(body, subject=""):
     """The customer's own words: above our quoted mail; if they wrote BELOW it (bottom-posting), the lines after the
     quote that are not quoted; if the body is empty, the subject without 'Re:' (a 'YES, BOOK IT' subject)."""
     body = body or ""
-    top = _QUOTED_START.split("\n" + body, maxsplit=1)[0].strip()   # "\n": the quote may start on the first line
+    top = _strip_footer(_QUOTED_START.split("\n" + body, maxsplit=1)[0])   # "\n": the quote may start on the first line
     if top:
         return top
-    m = _QUOTED_START.search("\n" + body)
-    if m:
+    m = _REPLY_MARK.search("\n" + body)                          # Outlook quotes (From:/Sent:) carry no answer below them
+    if m and _QUOTED_START.search("\n" + body).start() == m.start():
         rest = [l for l in ("\n" + body)[m.end():].splitlines() if not l.lstrip().startswith(">")]
-        bottom = "\n".join(rest).strip()
+        bottom = _strip_footer("\n".join(rest))
         if bottom:
             return bottom
     return re.sub(r"^\s*((re|aw|fwd?|wg)\s*:\s*)+", "", subject or "", flags=re.I).strip()

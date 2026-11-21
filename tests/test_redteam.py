@@ -338,5 +338,26 @@ class TestRound6Batch2(TestRound5Batch1):
                                        "6 pallets of machine parts"), [])
 
 
+class TestFootersAndOutlookQuotes(unittest.TestCase):
+    """Red-team round 7: a corporate footer ('We accept no liability') or an Outlook-quoted copy of OUR quote
+    ('I'll get it booked') read as the customer's yes -> false booking."""
+    OUR = "Hi Sara,\n\nyour 540 kg can go with Yellowtail for 1301.40 EUR. Just say the word and I'll get it booked.\n\nLena"
+    FOOT = ("\n\n--\nSara Lindqvist\nThis e-mail is confidential. We accept no liability for viruses. "
+            "Any booking or order is subject to our general terms.")
+
+    def test_footer_is_not_an_answer(self):
+        from booking.handlers import classify
+        self.assertEqual(classify("Thanks, I need to check internally and will come back to you." + self.FOOT), "unclear")
+        self.assertEqual(classify("Yes please, book it." + self.FOOT), "accept")
+
+    def test_outlook_quote_is_not_an_answer(self):
+        from booking.handlers import classify
+        for mark in ("-----Original Message-----\nFrom: Lena Hofmann\nSent: Saturday 23:40",
+                     "Von: Lena Hofmann <google@hackloop.mail>\nGesendet: Samstag, 21. November 2026",
+                     "________________________________\nFrom: Lena Hofmann"):
+            self.assertEqual(classify("Let me check with my manager first.\n\n%s\n\n%s" % (mark, self.OUR)), "unclear", mark)
+        self.assertEqual(classify("Yes please book.\n\n-----Original Message-----\nFrom: Lena\nSent: today\n\n" + self.OUR), "accept")
+
+
 if __name__ == "__main__":
     unittest.main()
