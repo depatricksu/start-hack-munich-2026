@@ -299,8 +299,19 @@ def final_options(thread_id, options):
     s = db.session(thread_id)
     fields = json.loads(s["fields"])
     prefer = fields.get("prefer")
+    air = [b for b in _usable(thread_id, "airline") if b["required"]]
+    if options and air:                               # portal down (503): sheets AND mailed airline bids compete
+        have = {x["airline"] for x in options}
+        for b in air:
+            if b["carrier"] in have:
+                continue
+            days = b["transit_days"] if b["transit_days"] is not None else 99   # unknown speed never wins "fastest"
+            options = options + [{"airline": b["carrier"], "origin": fields.get("origin"),
+                                  "destination": fields.get("destination"), "transit_days": int(-(-float(days) // 1)),
+                                  "currency": b["currency"], "total": b["total"], "total_eur": b["total_eur"],
+                                  "source": "bid", "bid_id": b["id"]}]
+        db.event("bids_merged", thread_id, added=[[b["carrier"], b["total_eur"], b["transit_days"]] for b in air])
     if not options:                                   # lane priced by bids only: pick by the booth rule
-        air = [b for b in _usable(thread_id, "airline") if b["required"]]
         if air:
             b, how = pick_bid(air, prefer)
             db.event("bid_picked", thread_id, role="airline", how=how, carrier=b["carrier"], total_eur=b["total_eur"],

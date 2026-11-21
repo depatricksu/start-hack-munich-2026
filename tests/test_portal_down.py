@@ -39,5 +39,21 @@ class TestPortalDownTriggersBids(unittest.TestCase):
         self.assertGreater(pending, 0)
 
 
+class TestBidsUsedWhenSheetsExist(unittest.TestCase):
+    def test_fast_bid_beats_slow_sheet(self):
+        import random, json, time
+        tid = random.randint(890000, 899999)
+        db.con().execute("INSERT OR REPLACE INTO sessions(thread_id,customer,status,fields,options,received_at) VALUES(?,?,?,?,?,?)",
+                         (tid, "c@x.mail", "waiting_bids", json.dumps({"origin": "HAM", "destination": "EZE", "weight_kg_total": 500, "prefer": "fastest"}),
+                          json.dumps([{"airline": "Wayzata Air Cargo", "total": "2000", "total_eur": "2000", "currency": "EUR", "transit_days": 6, "source": "sheet"}]), time.time()))
+        bids.ensure()
+        db.con().execute("INSERT INTO bids(thread_id,carrier,kind,email,role,required,status,requested_at,replied_at,total,currency,transit_days,total_eur) "
+                         "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (tid, "Meridian Freightways", "airline", "m@x", "airline", 1, "ok", time.time(), time.time(), "2400", "EUR", 3, "2400"))
+        opts = bids.final_options(tid, json.loads(db.session(tid)["options"]))
+        self.assertIn("Meridian Freightways", [o["airline"] for o in opts])
+        best = min(opts, key=lambda x: (x["transit_days"], float(x["total_eur"])))
+        self.assertEqual(best["airline"], "Meridian Freightways")
+
+
 if __name__ == "__main__":
     unittest.main()
