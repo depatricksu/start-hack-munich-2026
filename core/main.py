@@ -84,9 +84,14 @@ def handle_rfq(mail):
     diff = dg.compare(dict(fields, weight_kg_total=weight, volume_cbm_total=volume), mail)   # attachment vs mail (Riky)
     if diff:
         db.event("attachment_mismatch", tid, mail["id"], diff=diff, override=dg.override())
-        if dg.override():
-            weight = diff.get("gross_kg", {}).get("attachment", weight)
-            volume = diff.get("volume_cbm", {}).get("attachment", volume)
+        if dg.override():                                    # the packing list is the shipping document: price on it
+            used = {}
+            if "gross_kg" in diff and dg.winner(diff["gross_kg"]) != weight:
+                weight, used["gross_kg"] = dg.winner(diff["gross_kg"]), diff["gross_kg"]
+            if "volume_cbm" in diff and dg.winner(diff["volume_cbm"]) != volume:
+                volume, used["volume_cbm"] = dg.winner(diff["volume_cbm"]), diff["volume_cbm"]
+            if used:
+                fields["attachment_used"] = used             # dg.note() says so in the quote
     fields["weight_kg_total"], fields["volume_cbm_total"] = weight, volume
     db.update_session(tid, fields=fields, reply_template=fields.get("reply") or "", llm_cost_usd=usage.get("cost_usd"))
     price_and_quote(tid, mail, fields)
@@ -335,6 +340,7 @@ def finalize(tid):
 
     body, why = llm.final_reply(s["reply_template"], best, fields, s["customer"], tid)   # llm/: filled + quality gate
     best, body, _ = dg.apply(best, fields, body)            # DG paragraph (and surcharge if DG_MODE=surcharge)
+    body = dg.note(fields, body)                             # "priced on your packing list: 1729 kg, not 1210 kg"
     try:                                                     # last human touch (Riky): signed name, answer their asks
         first = db.con().execute("SELECT body FROM mails WHERE id=?", (tid,)).fetchone()
         body, touched = humanize.polish(body, fields, best, first[0] if first else "")
