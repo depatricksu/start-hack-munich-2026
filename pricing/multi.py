@@ -12,7 +12,8 @@ from decimal import Decimal
 
 from core import config, db, mailbox
 from pricing import price as sheets
-from shared.rfq import Level, from_fields, validate
+from shared.rfq import Level, _declared_dg, from_fields, validate
+import dg
 from llm import extract as llm_extract
 
 _ZONES = os.path.join(config.ROOT, "kit", "start-kit", "pickup_zones.csv")
@@ -39,7 +40,7 @@ def _options(o, d, w, v, tid, mail_id):
         opts += portal.options(o, d, w, v)
     except Exception as e:                                   # portal down: sheets still work
         db.event("portal_error", tid, mail_id, error=str(e))
-    return opts
+    return [x for x in opts if not x.get("fx_missing")]      # no exchange rate: its total_eur is not EUR, never sum it
 
 
 def price_all(tid, mail, fields):
@@ -76,6 +77,18 @@ def _line(p):
         b["origin"], b["destination"], ("%g" % s["weight_kg_total"]), b["total_eur"], b["airline"], b["transit_days"])
 
 
+def _dangerous_goods(tid, mail, fields):
+    """Declared dangerous goods for this mail: the dict found in an attachment (handle_rfq put it in fields["dg"]),
+    or what the mail itself declares when the model flagged it. None for normal cargo or a denial."""
+    declared = fields.get("dg")
+    flagged = fields.get("dangerous_goods") or any(x.get("dangerous_goods") for x in fields.get("shipments") or [])
+    if not declared and flagged:
+        declared = _declared_dg(mail)
+        if declared:
+            db.event("dg", tid, mail["id"], dg=declared, mode=dg.mode(), source="mail")
+    return declared or None
+
+
 def handle(tid, mail, fields):
     parts, problem = price_all(tid, mail, fields)
     db.event("multi_options", tid, mail["id"], shipments=len(fields.get("shipments") or []),
@@ -91,6 +104,11 @@ def handle(tid, mail, fields):
               "origin": parts[0]["best"]["origin"], "destination": parts[0]["best"]["destination"],
               "source": "multi", "parts": [p["best"] for p in parts]}
     db.update_session(tid, options=[o for p in parts for o in p["options"]])
+    declared = _dangerous_goods(tid, mail, fields)           # same DG handling as a single-shipment quote (dg/, Riky)
+    if declared and dg.mode() == "human":
+        why = "dangerous goods: " + dg.describe(declared if isinstance(declared, dict) else {})
+        db.update_session(tid, status="needs_human", note=why)
+        return db.event("needs_human", tid, mail["id"], why=why)
     if not db.claim_for_sending(tid):
         return db.event("quote_skipped_already_sent", tid)
 
@@ -99,6 +117,8 @@ def handle(tid, mail, fields):
     template = FALLBACK_DE if (json.loads(s["fields"] or "{}").get("language") or "").lower() == "de" else FALLBACK
     body = (template.replace("{PRICE_TABLE}", "\n".join(_line(p) for p in parts))
             .replace("{TOTAL}", "%.2f EUR" % total).replace("{SIGNER}", llm_extract.SIGNER))
+    lang = (json.loads(s["fields"] or "{}").get("language") or fields.get("language") or "en")
+    chosen, body, _ = dg.apply(chosen, {"dg": declared, "language": lang}, body)   # DG paragraph (+ surcharge on the total)
     if re.search(r"\{[A-Z_]+\}", body):                    # never send a raw placeholder
         db.update_session(tid, status="needs_human", note="reply still had a placeholder, not sent")
         return db.event("needs_human", tid, mail["id"], why="placeholder left in multi reply")
