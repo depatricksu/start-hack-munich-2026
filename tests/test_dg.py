@@ -55,7 +55,7 @@ class Apply(unittest.TestCase):
         best, body, human = dg.apply(BEST, fields, BODY)
         self.assertIsNone(human)
         self.assertEqual(best, BEST)
-        self.assertIn("UN1133, class 3 (Adhesives)", body)
+        self.assertIn("(UN1133, class 3, adhesives)", body)
         self.assertIn("Shipper's Declaration for Dangerous Goods", body)
         self.assertLess(body.index("Shipper's Declaration"), body.index("Best regards"))
         self.assertIn("1234.50 EUR", body)

@@ -140,10 +140,10 @@ def read_declaration(text):
 
 
 def describe(info):
-    """'UN1133, class 3 (Adhesives)' from whatever we know."""
-    parts = [p for p in (info.get("un"), "class " + info["class"] if info.get("class") else None) if p]
-    text = ", ".join(parts) or "dangerous goods"
-    return text + (f" ({info['name']})" if info.get("name") else "")
+    """'UN1133, class 3, adhesives' (or 'aerosols', or 'dangerous goods') from whatever we know. No nested brackets."""
+    parts = [p for p in (info.get("un"), "class " + info["class"] if info.get("class") else None,
+                         (info.get("name") or "").strip().lower() or None) if p]
+    return ", ".join(parts) or "dangerous goods"
 
 
 PARAGRAPH = {
@@ -179,11 +179,19 @@ def surcharge_eur(best):
 
 
 def _insert_before_signoff(body, paragraph):
-    """Put our paragraph before the closing ('Best regards', 'Mit freundlichen Grüßen', ...), else at the end."""
-    m = re.search(r"\n\s*(best regards|kind regards|regards|best|cheers|mit freundlichen|viele grüße|beste grüße|"
-                  r"cordiali saluti|saluti|cordialement|bien à vous|saludos|atentamente)\b", body, re.I)
-    if m:
-        return body[:m.start()].rstrip() + "\n\n" + paragraph + "\n" + body[m.start():]
+    """Put our paragraph right before a short closing line in the last 6 lines ('Best regards', 'Best wishes',
+    'Mit freundlichen Grüßen'...), with exactly one blank line on each side; else before a short signature block;
+    else at the end. A sentence that merely starts with 'Best' in the text is never taken for the closing."""
+    lines = body.rstrip().split("\n")
+    for i in range(len(lines) - 1, max(-1, len(lines) - 7), -1):
+        l = lines[i].strip()
+        if len(l) <= 40 and re.fullmatch(r"(?:best|kind|warm|many|with)?\s*(?:regards|wishes|greetings|cheers|thanks|best|"
+                                         r"mit freundlichen grüßen|(?:\w+ )?grüße|(?:\w+ )?gruesse|cordiali saluti|"
+                                         r"saluti|cordialement|bien à vous|saludos|atentamente)\s*[,.!]?", l, re.I):
+            return "\n".join(lines[:i]).rstrip() + "\n\n" + paragraph + "\n\n" + "\n".join(lines[i:]).lstrip("\n")
+    blocks = body.rstrip().split("\n\n")
+    if len(blocks) > 1 and len(blocks[-1].strip().splitlines()) <= 3 and not re.search(r"[.!?:]\s*$", blocks[-1].strip()):
+        return "\n\n".join(blocks[:-1]).rstrip() + "\n\n" + paragraph + "\n\n" + blocks[-1].strip()
     return body.rstrip() + "\n\n" + paragraph
 
 
