@@ -379,6 +379,8 @@ _TONNES = re.compile(r"(\d[\d,.]*)\s*(?:t|tons?|tonnes?|tonnen)\b", re.I)
 _MM = re.compile(r"(\d+(?:[.,]\d+)?)\s*[x\u00d7*]\s*(\d+(?:[.,]\d+)?)\s*[x\u00d7*]\s*(\d+(?:[.,]\d+)?)\s*mm\b", re.I)
 _NET = re.compile(r"\bnet(?:to)?(?:\s*weight|gewicht)?\s*[:=]?\s*(\d[\d,.]*)\s*kgs?\b|(\d[\d,.]*)\s*kgs?\s*net(?:to)?\b", re.I)
 _GROSS = re.compile(r"\b(?:gross|brutto)(?:\s*weight|gewicht)?\s*[:=]?\s*(\d[\d,.]*)\s*kgs?\b|(\d[\d,.]*)\s*kgs?\s*(?:gross|brutto)\b", re.I)
+_CUFT = re.compile(r"(\d[\d,.]*)\s*(?:cubic\s*f(?:ee|oo)t|cu\.?\s*f(?:ee)?t\.?|cbf|cft|ft3|ft\u00b3|ft\^3)", re.I)
+LB_KG, CUFT_CBM = 0.45359237, 0.028316846592
 _EXW = re.compile(r"\b(?:EXW|ex[ -]works|ab werk)\b", re.I)
 _INCHES = re.compile(r"(\d+(?:\.\d+)?)\s*[x\u00d7*]\s*(\d+(?:\.\d+)?)\s*[x\u00d7*]\s*(\d+(?:\.\d+)?)\s*"
                      r"(?:in\b|inch(?:es)?\b|\"|'')", re.I)
@@ -418,13 +420,46 @@ def fix_units(fields, mail):
         net, gross = nums(_NET), nums(_GROSS)
     except ValueError:
         net, gross = set(), set()
-    if not (lbs or dims or tonnes or mm or (net and len(gross) == 1)):
+    cuft = []
+    for m in _CUFT.finditer(text):
+        try:
+            cuft.append(_num(m.group(1).rstrip(".,")))
+        except ValueError:
+            pass
+    if not (lbs or dims or tonnes or mm or cuft or (net and len(gross) == 1)):
         return []
     fixed = []
     for f in [fields] + list(fields.get("shipments") or []):
         if any(_same(f.get("weight_kg"), n) for n in lbs):
             fixed.append("weight_kg %s lb" % f["weight_kg"])
             f["weight_kg"] = round(float(f["weight_kg"]) * 0.45359237, 1)
+        else:
+            # 5U, 22 Nov 00:12 (round 82): "gross weight of 1413.17 lb and a total volume of 95.00 cubic feet". The model
+            # converted by itself and got 641.52 kg and 2.68 cbm; the customer's own numbers are 641.0 kg and 2.69 cbm.
+            # A value within 3 % of an exact conversion is the model's arithmetic: code puts the exact number there.
+            # A value that is only rounded (2,200 lbs -> 998 kg, off by 0.01 %) stays as the model wrote it.
+            try:
+                w = float(f.get("weight_kg") or 0)
+            except (TypeError, ValueError):
+                w = 0
+            for n in lbs:
+                exact = round(n * LB_KG, 1)
+                if w and abs(w - n * LB_KG) <= 0.03 * n * LB_KG:
+                    if abs(w - n * LB_KG) > 0.0003 * n * LB_KG:
+                        fixed.append("weight_kg %s -> %s (exact from %s lb)" % (f["weight_kg"], exact, n))
+                        f["weight_kg"] = exact
+                    break
+        try:
+            v = float(f.get("volume_cbm") or 0)
+        except (TypeError, ValueError):
+            v = 0
+        for n in cuft:
+            exact = round(n * CUFT_CBM, 2)
+            if v and (_same(v, n) or abs(v - n * CUFT_CBM) <= 0.03 * n * CUFT_CBM):
+                if abs(v - n * CUFT_CBM) > 0.0003 * n * CUFT_CBM and v != exact:
+                    fixed.append("volume_cbm %s -> %s (exact from %s cubic feet)" % (f["volume_cbm"], exact, n))
+                    f["volume_cbm"] = exact
+                break
         if any(_same(f.get("weight_kg"), n) for n in tonnes):
             fixed.append("weight_kg %s t" % f["weight_kg"])
             f["weight_kg"] = round(float(f["weight_kg"]) * 1000, 1)
