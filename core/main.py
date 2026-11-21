@@ -14,6 +14,7 @@ from router.route import route
 from llm import extract as llm
 from pricing import price as sheets
 from sourcing import portal
+from actions import queue as actions            # take-over queue: sends human replies typed in the UI
 from shared.rfq import gate as rfq_gate
 from pricing import multi
 
@@ -176,6 +177,7 @@ def run():
                 since = nxt
                 db.set_state("since_id", since)
             tick()
+            actions.tick()                                   # human replies from the UI (actions/queue.py)
         except Exception as e:                               # network hiccup: log and keep going
             db.event("loop_error", error=str(e))
         time.sleep(config.POLL_S)
