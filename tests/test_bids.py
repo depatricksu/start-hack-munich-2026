@@ -125,9 +125,25 @@ class TestBids(unittest.TestCase):
         return json.loads(s["chosen"])["trucker_total"]
 
     def test_trucker_pick_follows_the_booth_rule(self):
-        self.assertEqual(self._door(7711001, "none"), "110.00")       # no preference: balanced 50/50, not cheapest
-        self.assertEqual(self._door(7711002, "cheapest"), "100.00")   # customer asked for the cheapest
-        self.assertEqual(self._door(7711003, "fastest"), "110.00")    # customer asked for fast
+        # Pin the rule so the live .env (which may override BID_PICK) does not change this unit test of the auto logic.
+        from core import config
+        old = config.BID_PICK
+        config.BID_PICK = "auto"
+        try:
+            self.assertEqual(self._door(7711001, "none"), "110.00")       # no preference: balanced 50/50, not cheapest
+            self.assertEqual(self._door(7711002, "cheapest"), "100.00")   # customer asked for the cheapest
+            self.assertEqual(self._door(7711003, "fastest"), "110.00")    # customer asked for fast
+        finally:
+            config.BID_PICK = old
+
+    def test_bid_pick_flag_forces_balanced_for_everyone(self):
+        from core import config
+        old = config.BID_PICK
+        config.BID_PICK = "balanced"
+        try:
+            self.assertEqual(self._door(7711010, "cheapest"), "110.00")   # flag overrides: balanced even for a cheapest customer
+        finally:
+            config.BID_PICK = old
 
     def test_hours_are_read_and_stored(self):
         self._door(7711004, "none")
