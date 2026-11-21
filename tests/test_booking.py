@@ -49,7 +49,7 @@ class TestClassify(unittest.TestCase):
         self.assertEqual(c("We went with another forwarder."), "decline")
         self.assertEqual(c("Too expensive, can you do better?"), "better_price")
         self.assertEqual(c("Geht es günstiger?"), "better_price")
-        self.assertEqual(c("Could you do it faster?"), "unclear")
+        self.assertEqual(c("Could you do it faster?"), "faster")          # red-team round 4: we offer the fastest option
         self.assertEqual(c("Yes please book.\n\n> Our all-in price is ... could you?"), "accept")
 
 

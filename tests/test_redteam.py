@@ -167,5 +167,67 @@ class TestExcludedAirlines(unittest.TestCase):
         self.assertEqual(main.excluded_airlines(tid), set())
 
 
+class TestBackAndForth(unittest.TestCase):
+    """Red-team round 4 (21 Nov ~20:30): replies after our quote, and corrections before it."""
+    QUOTE = "Hello Sara,\n\nwe can offer 1234.00 EUR all-in with Yellowtail, about 4 days. I'll book it right away if you agree?\n\nLena"
+
+    def test_bottom_posted_yes(self):
+        from booking.handlers import classify
+        body = "On Sat, Lena Hofmann wrote:\n> " + self.QUOTE.replace("\n", "\n> ") + "\n\nOK, please book it. Thanks!\nSara"
+        self.assertEqual(classify(body), "accept")
+
+    def test_our_quoted_words_never_count(self):
+        from booking.handlers import classify
+        body = "Thanks, let me check internally.\n\nOn Sat, Lena Hofmann wrote:\n> " + self.QUOTE.replace("\n", "\n> ")
+        self.assertEqual(classify(body), "unclear")
+
+    def test_yes_in_subject_only(self):
+        from booking.handlers import classify
+        self.assertEqual(classify("", "Re: Air freight FRA-ORD - YES, BOOK IT"), "accept")
+        self.assertEqual(classify("", "Re: Air freight FRA-ORD"), "unclear")
+
+    def test_faster(self):
+        from booking.handlers import classify
+        self.assertEqual(classify("Do you have anything faster? We could pay a bit more."), "faster")
+        self.assertEqual(classify("Gibt es auch etwas Schnelleres? Früher wäre gut."), "faster")
+        self.assertEqual(classify("Can you do it cheaper?"), "better_price")
+
+    def _session(self, tid, status, fields, note=""):
+        from core import db, mailbox
+        m = mailbox.normalize({"id": tid, "from": "sara@lindqvist-medtech.mail", "subject": "Air freight FRA-ORD",
+                               "body": "cheapest FRA to ORD, 540 kg, 2.8 cbm"})
+        db.save_mail(m)
+        db.new_session(m)
+        db.update_session(tid, status=status, fields=fields, note=note, customer="sara@lindqvist-medtech.mail",
+                          chosen={"airline": "Yellowtail Air Freight", "origin": "FRA", "destination": "ORD", "total": "1234.00",
+                                  "currency": "EUR", "transit_days": 4})
+
+    def _reply(self, tid, n, body):
+        from core import mailbox
+        from booking import handlers
+        handlers.handle_follow_up(mailbox.normalize({"id": tid + n, "from": "sara@lindqvist-medtech.mail", "subject": "Re: Air freight FRA-ORD",
+                                                     "body": body, "in_reply_to": tid, "references": [tid]}))
+
+    def test_clear_yes_after_an_unclear_reply_is_read(self):
+        from core import db
+        from booking import handlers
+        tid = 9820000
+        self._session(tid, "needs_human", {"origin": "FRA", "destination": "ORD", "weight_kg_total": 540}, note=handlers.UNCLEAR_NOTE)
+        self._reply(tid, 1, "Great, then please book it.")
+        self.assertNotEqual(db.session(tid)["status"], "needs_human")
+        kinds = [r["kind"] for r in db.con().execute("SELECT kind FROM events WHERE thread_id=?", (tid,))]
+        self.assertIn("follow_up", kinds)
+
+    def test_correction_during_bid_wait_changes_the_weight(self):
+        import json
+        from core import db
+        tid = 9820100
+        self._session(tid, "waiting_bids", {"origin": "FRA", "destination": "ORD", "weight_kg_total": 540, "volume_cbm_total": 2.8})
+        self._reply(tid, 1, "Sorry, correction: it is 6 pallets, total 760 kg and 3.6 cbm, not 540 kg.")
+        f = json.loads(db.session(tid)["fields"])
+        self.assertEqual((f["weight_kg_total"], f["volume_cbm_total"]), (760.0, 3.6))
+        self.assertTrue(json.loads(db.session(tid)["options"]))            # sheet prices for the new weight
+
+
 if __name__ == "__main__":
     unittest.main()

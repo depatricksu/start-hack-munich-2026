@@ -74,15 +74,38 @@ _SEND = (r"(send|provide|forward|share|supply|pass (?:it |them |you )?along|get 
 SENDING_DOCS = re.compile(_SEND + r"[^.?!]{0,60}?" + _DOCS + r"|" + _DOCS + r"[^.?!]{0,60}?" + _SEND, re.I)
 
 
-def classify(body):
-    """accept / decline / better_price / sending_docs / unclear. Only the customer's new text counts, not our quoted mail below it."""
-    text = re.split(r"\n\s*(>|On .+wrote:|Am .+schrieb)", body or "", maxsplit=1)[0]
+FASTER = re.compile(r"\b(faster|quicker|sooner|earlier|express|speed (it )?up|schneller|früher|eiliger|più veloce|plus rapide|"
+                    r"más rápido)\b", re.I)
+_QUOTED_START = re.compile(r"\n\s*(?:>|On .+wrote:|Am .+schrieb)")
+
+
+def own_text(body, subject=""):
+    """The customer's own words: above our quoted mail; if they wrote BELOW it (bottom-posting), the lines after the
+    quote that are not quoted; if the body is empty, the subject without 'Re:' (a 'YES, BOOK IT' subject)."""
+    body = body or ""
+    top = _QUOTED_START.split("\n" + body, maxsplit=1)[0].strip()   # "\n": the quote may start on the first line
+    if top:
+        return top
+    m = _QUOTED_START.search("\n" + body)
+    if m:
+        rest = [l for l in ("\n" + body)[m.end():].splitlines() if not l.lstrip().startswith(">")]
+        bottom = "\n".join(rest).strip()
+        if bottom:
+            return bottom
+    return re.sub(r"^\s*((re|aw|fwd?|wg)\s*:\s*)+", "", subject or "", flags=re.I).strip()
+
+
+def classify(body, subject=""):
+    """accept / decline / better_price / faster / sending_docs / unclear. Only the customer's new text counts."""
+    text = own_text(body, subject)
     if DECLINE.search(text) or (NEGATED_PROCEED.search(text) and not HEDGE.search(text)):   # definitive "won't proceed" = decline; "not yet" = wait (unclear)
         return "decline"
     if PRICE.search(text):
         return "better_price"
     if ACCEPT.search(text) and not QUESTION.search(text) and not CONDITION.search(text) and not NEW_FACTS.search(text):
         return "accept"
+    if FASTER.search(text) and not ACCEPT.search(text):
+        return "faster"
     if SENDING_DOCS.search(text):              # proceeding, just sending the DG papers first
         return "sending_docs"
     return "unclear"
@@ -259,17 +282,86 @@ def chosen_from_reply(s):
     return hits[0]
 
 
+UNCLEAR_NOTE = "customer answered the quote, not a clear yes or no"
+
+
+def handle_faster(s, mail):
+    """'Anything faster?': offer our fastest option if it is faster than the one we quoted, like the cheaper offer."""
+    tid = s["thread_id"]
+    view, lang = _session_view(s)
+    chosen, options = json.loads(s["chosen"] or "{}"), json.loads(s["options"] or "[]")
+    days = lambda o: float(o.get("transit_days") if o.get("transit_days") is not None else 99)   # noqa: E731
+    faster = sorted((o for o in options if days(o) < days(chosen)), key=lambda o: (days(o), Decimal(str(o.get("total_eur") or o["total"]))))
+    if not faster:
+        return _needs_human(tid, mail["id"], "customer wants it faster, we quoted our fastest option already")
+    alt = faster[0]
+    body = _write("faster_option", lang, view, {"ALT_AIRLINE": alt["airline"], "ALT_TRANSIT": alt.get("transit_days"),
+                                                "ALT_PRICE": "%s %s" % (alt["total"], alt["currency"])})
+    _reply_session(s, mail, body, "faster_option")
+    db.update_session(tid, chosen=alt, note="customer wanted it faster, faster option offered")
+    return db.event("faster_option_offered", tid, mail["id"], before=chosen.get("transit_days"), after=alt.get("transit_days"))
+
+
+def correction_before_quote(s, mail):
+    """The customer corrects weight / volume while we still wait for bids ('6 pallets, 760 kg, not 540'). Before, the
+    mail was ignored and we quoted the old weight (red-team round 4). Now: the new totals go into the form, sheet and
+    portal prices are taken again, and the airline bids (asked for the OLD weight) no longer count. Code only."""
+    from core import main
+    from shared.rfq import extract_rfq
+    tid = s["thread_id"]
+    text = own_text(mail["body"], mail.get("subject"))
+    r = extract_rfq("", text)
+    fields = json.loads(s["fields"] or "{}")
+    new_kg, new_cbm = r.weight_kg, r.volume_cbm
+    old_kg, old_cbm = fields.get("weight_kg_total"), fields.get("volume_cbm_total")
+    if not new_kg and not new_cbm:
+        return db.event("follow_up_ignored", tid, mail["id"], status=s["status"], why="no new weight or volume")
+    # "not 540 kg": the first weight is the new one only if the old value is the one negated
+    kgs = [float(x.replace(",", ".")) for x in re.findall(r"(\d+(?:[.,]\d+)?)\s*kg", text, re.I)]
+    if old_kg and len(kgs) > 1:
+        new_kg = next((k for k in kgs if abs(k - float(old_kg)) > 0.5), new_kg)
+    changed = {}
+    if new_kg and (not old_kg or abs(float(new_kg) - float(old_kg)) > 0.5):
+        changed["weight_kg_total"] = float(new_kg)
+    if new_cbm and (not old_cbm or abs(float(new_cbm) - float(old_cbm)) > 0.005):
+        changed["volume_cbm_total"] = float(new_cbm)
+    if not changed:
+        return db.event("follow_up_ignored", tid, mail["id"], status=s["status"], why="same weight and volume")
+    fields.update(changed)
+    fields["weight_kg"], fields["volume_cbm"] = fields["weight_kg_total"], fields["volume_cbm_total"]
+    fields["pieces"] = []                                        # the old pieces describe the old shipment
+    o, d, w, v = fields["origin"], fields["destination"], fields["weight_kg_total"], fields.get("volume_cbm_total") or 0
+    options = [dict(x, total_eur=x["total"]) for x in main.sheets.options(o, d, w, v)]
+    try:
+        options += main.portal.options(o, d, w, v)
+    except Exception as e:
+        db.event("portal_error", tid, mail["id"], error=str(e))
+    from sourcing import bids
+    bids.ensure()                                                # the bid columns (role, status...) exist
+    db.con().execute("UPDATE bids SET status='stale_weight', required=0 WHERE thread_id=? AND role IN ('airline','ratedesk')", (tid,))
+    db.update_session(tid, fields=fields, options=options)
+    db.event("customer_correction", tid, mail["id"], changed=changed, before={"weight_kg_total": old_kg, "volume_cbm_total": old_cbm},
+             options=len(options))
+    if not options:
+        return main.needs_human(tid, mail, "customer corrected the shipment, no sheet/portal price for the new weight")
+
+
 def handle_follow_up(mail):
     tid = mail["thread_id"]
     s = db.session(tid)
     if s and s["status"] == "asked_customer":                    # answer to our clarifying question (llm/clarify.py)
         from llm import clarify
         return clarify.answer(mail)
+    if s and s["status"] in ("new", "waiting_bids") and mail["sender"] == (s["customer"] or "").lower():
+        return correction_before_quote(s, mail)                  # they changed the shipment before our quote went out
+    if s and s["status"] == "needs_human" and (s.get("note") or "").startswith(UNCLEAR_NOTE):
+        s = dict(s, status="quoted")                             # 'does it include X?' then 'ok, book it': read the new mail
+        db.update_session(tid, status="quoted", note="customer wrote again after an unclear reply")
     if not s or s["status"] not in ("quoted", "meeting_proposed", "awaiting_docs"):
         return db.event("follow_up_ignored", tid, mail["id"], status=s and s["status"])
     if mail["sender"] != (s["customer"] or "").lower():          # only the customer who asked can book on this quote
         return _needs_human(tid, mail["id"], "reply from %s, not from the customer %s" % (mail["sender"], s["customer"]))
-    verdict = classify(mail["body"])
+    verdict = classify(mail["body"], mail.get("subject"))
     db.event("follow_up", tid, mail["id"], verdict=verdict, status=s["status"])
     if s["status"] == "meeting_proposed" and verdict != "decline":   # "Tue 10:00, please confirm" is not a booking
         return _needs_human(tid, mail["id"], "customer answered our call offer (picked a time?): forwarder to follow up")
@@ -277,12 +369,14 @@ def handle_follow_up(mail):
         return db.update_session(tid, status="lost", note="customer declined")       # no mail, just closed
     if verdict == "better_price":
         return handle_better_price(s, mail)
+    if verdict == "faster":
+        return handle_faster(s, mail)
     if s["status"] != "awaiting_docs":                   # on a quote still open, a soft/unclear reply does not book
         if verdict == "sending_docs":                    # "we'll send the DG papers" IS the yes for 5U (rounds 39-41 counted
             db.event("sending_docs_book_now", tid, mail["id"])   # accepted). Book NOW: the rate ID expires in ~15 min and a
             # second customer mail may never come (Kai's review of #36). The papers can follow the booking. (Riky)
         if verdict == "unclear":
-            return _needs_human(tid, mail["id"], "customer answered the quote, not a clear yes or no")
+            return _needs_human(tid, mail["id"], UNCLEAR_NOTE)
     # status == awaiting_docs and not a decline: the promised documents arrived -> proceed to book below
 
     chosen, fields = (json.loads(s["chosen"] or "null") or chosen_from_reply(s)), json.loads(s["fields"] or "{}")
