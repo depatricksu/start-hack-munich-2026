@@ -35,3 +35,10 @@ Price 45 (accepted = within 5% of best), LLM cost 40 (full at 0, zero at 0.10 US
 - Fuel and security surcharges are per kg of billed weight, on top.
 - Door-to-port: `pickup_zones.csv` maps a German postcode zone to FRA, MUC, DUS, HAM, STR or CGN. Truckers in `carrier-list.csv` cover zones.
 - Tariff formats are mixed: PDF, XLSX, DOCX, TXT and JPG pages.
+
+## Where each airline is priced (checked 21 Nov 14:10 with the team key)
+- 15 airlines are on the portal API (114 lanes, 6 German origins, 36 destinations): Aurelia, Borealis, Fjordline, Gannet, Ibisair, Juniper, Lumen, Meridian, Nova Atlas, Polaris, Riverbend, Solace, Tamarind, Ultraviolet, Xenon. Lanes in `docs/portal-lanes.json`.
+- 10 airlines are only in the start kit sheets: Cobalt, Danube Wings, Elbflug, Helix, Kestrel, Orion, Quetzal, Vega, Wayzata, Yellowtail.
+- 4 airlines serve only exotic destinations (ASU KTM PPT TNR ULN) and are priced by email: Zephyr Steppe, Himalaya Bridge, Lagoon Isles, Pampero.
+- Truckers are priced by email for the door-to-port leg.
+- Mailbox was empty before 16:00. Team mailbox `google@hackloop.mail`.
