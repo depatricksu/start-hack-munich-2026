@@ -57,6 +57,11 @@ REPLIES = [
     ("De acuerdo, pero no con esa aerolínea.", "unclear"),
     ("No gracias, ya lo hemos resuelto.", "decline"),
     ("¿Hay algo más barato?", "better_price"),
+    # fixed (#56): an Italian / French / Spanish "we do not proceed" is a no, not a booking
+    ("Grazie, ma non procediamo con questa offerta.", "decline"),
+    ("Merci, mais nous ne donnerons pas suite à cette offre.", "decline"),
+    ("Gracias, pero no vamos a reservar con ustedes.", "decline"),
+    ("Va bene, procediamo con la prenotazione.", "accept"),
 ]
 
 # (text, expected, what the clerk says today, issue)
@@ -73,8 +78,6 @@ REPLIES_KNOWN_WRONG = [
     (LONG_YES_WITH_BUT, "accept", "unclear", 54),
     ("Thanks, but we decided to go with another forwarder this time.", "decline", "unclear", 55),
     ("Thanks a lot, we'll pass on this one.", "decline", "unclear", 55),
-    # DANGEROUS: "we do not proceed" is booked ("procedi" matches inside "procediamo", no Italian negation).
-    ("Grazie, ma non procediamo con questa offerta.", "decline", "accept", 56),
     ("È possibile avere un prezzo migliore?", "better_price", "unclear", 57),
     ("C'est un peu cher, vous pouvez faire mieux ?", "better_price", "unclear", 57),
     # A real yes, but DG papers follow: we must wait for them, not book now (5U rejects dg_docs_missing).
@@ -109,6 +112,11 @@ MAILS = [
        "Cotización"), "rfq"),
     (m("Our sales team needs to send product samples, 15 kg, to our office in Chicago. Can you schedule a call?",
        "Samples to Chicago"), "rfq"),
+    # fixed (#62, #63): a spam word never drops a mail that names a shipment
+    (m("Hi, our password-protected warehouse in Munich has 4 boxes ready for Toronto, about 60 kilos in total. "
+       "Can you help?", "Boxes to Toronto"), "rfq"),
+    (m("Newsletter reader here: we need to fly a vehicle engine to Mexico City next week, can you help?",
+       "Engine to Mexico"), "rfq"),
 ]
 
 MAILS_KNOWN_WRONG = [
@@ -123,12 +131,6 @@ MAILS_KNOWN_WRONG = [
     # here, but a forwarder never replies to this; judged spam.
     (m("We are a bonded warehouse at Frankfurt airport with 5000 m3 free space. Partnership opportunity? Our sales "
        "manager can call you.", "Warehouse space FRA"), "spam", "rfq", 61),
-    # DANGEROUS: real requests dropped with no reply. "kilos" is not a unit to FREIGHT, "password" is a spam word.
-    (m("Hi, our password-protected warehouse in Munich has 4 boxes ready for Toronto, about 60 kilos in total. "
-       "Can you help?", "Boxes to Toronto"), "rfq", "spam", 62),
-    # "newsletter" + no FREIGHT word ("fly", "engine", "ship" are not in it): a real request dropped.
-    (m("Newsletter reader here: we need to fly a vehicle engine to Mexico City next week, can you help?",
-       "Engine to Mexico"), "rfq", "spam", 63),
 ]
 
 # ---------------------------------------------------------------- 3. dangerous goods (30, all right after the #64-#69 fixes)
@@ -210,7 +212,7 @@ class TestDangerousGoods(unittest.TestCase):
                 self.assertEqual(got, now)
 
     def test_table_sizes(self):
-        self.assertEqual(len(REPLIES) + len(REPLIES_KNOWN_WRONG), 40)
+        self.assertEqual(len(REPLIES) + len(REPLIES_KNOWN_WRONG), 43)
         self.assertEqual(len(MAILS) + len(MAILS_KNOWN_WRONG), 20)
         self.assertEqual(len(DG) + len(DG_KNOWN_WRONG), 30)
 

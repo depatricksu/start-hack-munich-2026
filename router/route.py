@@ -14,7 +14,9 @@ SPAM = re.compile(r"\b(you('ve| have)? won|winner|prize|lottery|gewinnspiel|gewo
                   r"claim your|gift ?card|bitcoin|crypto|investment opportunit\w*|earn \$|make money|viagra|casino|"
                   r"verify your (account|password)|password|api key|login details|bank details|wire transfer|"
                   r"unsubscribe|newsletter|seo services|backlinks)\b", re.I)
-FREIGHT = re.compile(r"\b(\d[\d.,]*\s*(kg|kgs|lbs?|t|tons?|tonnen|cbm|m3)|quote|quotation|rfq|rate|freight|shipment|"
+FREIGHT = re.compile(r"\b(\d[\d.,]*\s*(kg|kgs|kilos?|kilograms?|lbs?|t|tons?|tonnen|cbm|m3)|quote|quotation|rfq|rate|freight|shipment|"
+                     # red-team #62, #63: "60 kilos", "4 boxes", "we need to fly an engine to Mexico City" are requests
+                     r"ship|shipping|fly|flight|air\s?freight|luftfracht|boxes|cartons|crates|versand|spedizione|envío|"
                      r"cargo|pallets?|airport|angebot|fracht|sendung|paletten|cotizaci\w+|devis|[A-Z]{3}\s*(-|to|nach|->)\s*[A-Z]{3})\b",
                      re.I)
 # A vendor selling to US (5U 21:21: "FreightSoft Pro answers every RFQ in under 60 seconds, book 15 minutes for a
