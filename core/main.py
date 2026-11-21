@@ -22,6 +22,7 @@ from llm import clarify
 from sourcing import bids                               # truckers, rare lanes, rate desk: prices by mail (Kai)
 from booking import tracking
 from booking import handlers as booking                 # task 04: accept -> book -> keep the customer informed
+import dg                                               # dangerous goods in attachments -> the quote (Riky)
 
 _ZONES = os.path.join(config.ROOT, "kit", "start-kit", "pickup_zones.csv")
 ZONE_AIRPORT = {r["zone"]: r["airport"] for r in csv.DictReader(open(_ZONES))}
@@ -61,6 +62,9 @@ def handle_rfq(mail):
 
     fields, usage = llm.extract(mail)                       # the one gateway call
     db.event("llm", tid, mail["id"], fields=fields, usage=usage)
+    fields["dg"] = dg.check_mail(mail)                      # DG declared only in the attachment (5U change ~17:00)
+    if fields["dg"]:
+        db.event("dg", tid, mail["id"], dg=fields["dg"], mode=dg.mode())
     fields["origin"] = _airport(fields.get("origin"))        # the string "NULL" must not block zone->airport
     fields["destination"] = _airport(fields.get("destination"))
     postcode = str(fields.get("pickup_postcode") or "")
@@ -134,10 +138,13 @@ def finalize(tid):
     else:
         best = min(options, key=lambda x: Decimal(x["total_eur"]))
     best = quote_in_eur(best)
+    if fields.get("dg") and dg.mode() == "human":
+        return needs_human(tid, None, "dangerous goods: " + dg.describe(fields["dg"]))
     if not db.claim_for_sending(tid):                        # someone already quoted this thread
         return db.event("quote_skipped_already_sent", tid)
 
     body, why = llm.final_reply(s["reply_template"], best, fields, s["customer"], tid)   # llm/: filled + quality gate
+    best, body, _ = dg.apply(best, fields, body)            # DG paragraph (and surcharge if DG_MODE=surcharge)
     if why:                                                  # the model's text failed the gate: our own template went out
         db.event("reply_gate", tid, reasons=why, language=fields.get("language"))
     subject = s["subject"] if s["subject"].lower().startswith("re:") else "Re: " + s["subject"]
