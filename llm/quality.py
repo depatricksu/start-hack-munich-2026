@@ -9,7 +9,7 @@ wrote "drop off before the latest time provided by us" although nobody had given
 import re
 from . import lang as langmod
 
-MAX_WORDS = 90
+MAX_WORDS = 105      # was 90: the model's text (asked to stay under 75) + our weight note + the answer to their wish
 
 # Things we cannot know or promise from our data (airline, transit days, price, route, weight, pickup).
 DENY = re.compile(
@@ -17,7 +17,28 @@ DENY = re.compile(
     r"insur\w+|packag\w+|packing|label\w*|paperwork|documents? (?:are|is|will)|guarante\w+|on time|by tomorrow|"
     r"frist\w*|spätestens|anlieferung\w*|anliefern|annahmeschluss|zoll\w*|verzoll\w*|versicher\w+|verpack\w+|"
     r"garanti\w+|pünktlich|dogan\w*|douane\w*|aduana\w*|assicura\w+|assurance\w*|imballa\w+|emballage\w*|"
-    r"scadenza|délai|plazo)\b", re.I)
+    r"scadenza|délai(?!s? de transit| d'acheminement)|plazo(?! de tránsito)|"            # "délai de transit" is transit time
+    r"direct flight|non-?stop|direktflug|auf direktem weg|volo diretto|vol direct|vuelo directo)\b", re.I)
+
+# "We deliver to the airport ourselves" is the customer's own fact: saying it back ("dass Sie selbst anliefern") is
+# not a drop-off time of ours. Allowed only when THEY wrote it and our sentence says who delivers.
+SELF_DELIVERY = re.compile(r"(deliver|drop|bring|liefern|anliefer)[^.\n]{0,60}\b(ourselves|selbst|selber)\b|"
+                           r"\b(selbst|selber)\b[^.\n]{0,60}\b(anliefer\w*|an)\b", re.I)
+_DELIVERY_WORD = re.compile(r"anliefer\w*|drop[\s-]?off|dropped off", re.I)
+_WHO_DELIVERS = re.compile(r"\b(selbst|selber|yourselves|yourself)\b", re.I)
+# The opposite mistake: they asked us to collect at their site and the reply says they bring it.
+_THEY_BRING = re.compile(r"you(?:['’]ll| will)? (?:arrange|organi[sz]e|handle|take care of) (?:the |your own )?(?:pickup|collection|truck)|"
+                         r"\b(yourselves|yourself)\b|\bsie\b[^.\n]{0,40}\bselbst\b[^.\n]{0,30}\b(anliefer\w*|bringen|abholen)", re.I)
+
+
+def self_delivery(text):
+    return bool(SELF_DELIVERY.search(text or ""))
+
+
+def _sentence(text, m):
+    a = max(text.rfind(".", 0, m.start()), text.rfind("\n", 0, m.start())) + 1
+    b = text.find(".", m.end())
+    return text[a:b if b >= 0 else len(text)]
 
 # Phrases people do not write and language models do.
 AI_PHRASES = re.compile(
@@ -40,6 +61,29 @@ def numbers(text):
     return sorted({_digits(n) for n in _NUM.findall(text or "")})
 
 
+_DATE = re.compile(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b|\b(\d{1,2})[./](\d{1,2})[./](\d{4}|\d{2})?")
+
+
+def date_forms(text):
+    """A date the customer wrote ("ready on 2026-11-29") may come back the way their language writes it
+    ("am 29.11.", "29/11", "11/29"): the digit strings of those forms. Their date, not a date of ours."""
+    out = set()
+    for y, m, d, d2, m2, y2 in _DATE.findall(text or ""):
+        y, m, d = (y, m, d) if y else (y2, m2, d2)
+        try:
+            mi, di = int(m), int(d)
+        except ValueError:
+            continue
+        if not (1 <= mi <= 12 and 1 <= di <= 31):
+            continue
+        for dd in {str(di), "%02d" % di}:
+            for mm in {str(mi), "%02d" % mi}:
+                out.update({dd, mm, dd + mm, mm + dd})         # "the 3rd", "am 2. Dezember", "29.11.", "11/29"
+                if y:
+                    out.update({dd + mm + y, dd + mm + y[-2:], mm + dd + y, y + mm + dd})
+    return sorted(out)
+
+
 def customer_lines(body):
     """The customer's sign-off lines (name, company): they must never show up as OUR signature."""
     lines = [l.strip(" ,.-") for l in (body or "").strip().split("\n") if l.strip()]
@@ -47,7 +91,7 @@ def customer_lines(body):
 
 
 def _allowed_numbers(best, fields):
-    ok = set(fields.get("customer_numbers") or [])
+    ok = set(fields.get("customer_numbers") or []) | set(fields.get("customer_dates") or [])
     try:                                                   # the weight we bill (next bracket / volume weight) is our own number too
         chargeable = max(float(fields.get("weight_kg_total") or fields.get("weight_kg") or 0),
                          float(fields.get("volume_cbm_total") or fields.get("volume_cbm") or 0) * 167)
@@ -103,9 +147,16 @@ def check(body, lang, best, fields, customer="", signer="", extra_names=()):
     if words > MAX_WORDS:
         reasons.append("too long: %d words" % words)
 
-    m = DENY.search(main)
-    if m:
+    for m in DENY.finditer(main):
+        if (fields.get("self_delivery") and _DELIVERY_WORD.fullmatch(m.group(0))
+                and _WHO_DELIVERS.search(_sentence(main, m))):
+            continue                                         # their own statement, said back to them
         reasons.append("says something we cannot know: %r" % m.group(0))
+        break
+    if fields.get("pickup_postcode") and not fields.get("self_delivery"):
+        m = _THEY_BRING.search(main)
+        if m:
+            reasons.append("says the customer delivers, but they asked for pickup: %r" % m.group(0))
     m = AI_PHRASES.search(main)
     if m:
         reasons.append("machine phrase: %r" % m.group(0))

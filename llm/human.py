@@ -10,6 +10,8 @@ Styles (the arms of the experiment):
     destination  a nod to where the cargo goes ("Next stop for your cargo: the Windy City.")
     moment       when they wrote ("Saturday evening, but your request didn't have to wait.")
     local        regional greeting (Moin / Servus / Grüß Gott) + the city line
+    mirror       the customer wrote something personal: we answer THAT (see mirror() below). Not sampled:
+                 it is used whenever they did, and counted like the others so the report shows if it wins.
 
 Learning: the public board (GET /v1/board) has a `human` count per team. When ours goes up, the quotes we sent
 since the last check share the win; a quote that sees no win within LEARN_WINDOW_S counts as a loss. Each style
@@ -17,12 +19,12 @@ keeps Beta(wins+1, losses+1) and the next quote picks a style by Thompson sampli
 while the others still get tried. State: data/human_learn.json. Look at it: `python3 -m llm.human`.
 Only the live runner (DRY_RUN=0) records and learns; everyone else just renders.
 """
-import csv, json, os, random, re, threading, time, urllib.request, zlib
+import csv, hashlib, json, os, random, re, threading, time, urllib.request, zlib
 from datetime import datetime, timedelta, timezone
 
 from core import config
 
-STYLES = ("control", "city", "destination", "moment", "local")
+STYLES = ("control", "city", "destination", "moment", "local", "mirror")
 STATE = os.path.join(config.ROOT, "data", "human_learn.json")
 TEAM = os.environ.get("TEAM_NAME", "Google")
 LEARN_WINDOW_S = float(os.environ.get("HUMAN_LEARN_WINDOW_S", "1800"))   # the jury may judge a round late
@@ -191,6 +193,210 @@ def apply(body, style, fields, lang, received_at=None):
     if line and len(lines) > 4:
         lines = lines[:-4] + ["", line] + lines[-4:]
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------------------------------- mirror + shape
+# What humanize/ (Riky) does not do. The jury reads the accepted mails with team names hidden; ours were clean but
+# every one had the same first sentence, the same last line, and never answered what the customer said as a person.
+#   mirror   answer THEIR personal line: "Hope your week's going well!" -> "All good here, thanks, ...",
+#            "have a lovely day!" -> "Have a lovely day too!", "Best greetings from Regensburg" -> our sign-off
+#            becomes "Best regards to Regensburg". Only what they wrote, never invented. Code, $0.
+#   card     one line under the customer's mail in the ONE gateway call: the shape of this reply (first sentence,
+#            one detail of theirs, last line), rotated by thread. About 110 tokens, $0.00002 per quote.
+#   polish   first word after the greeting line as a native writes it; a greeting line if the model left it out;
+#            their first name when the model wrote only "Hi,".
+
+_QUOTED = re.compile(r"^\s*(-{2,}.*(original|ursprüngliche|forwarded|weitergeleitete).*|(from|von|sent|gesendet|subject|betreff)\s*:.*"
+                     r"|on .+ wrote:\s*|am .+ schrieb.*|>.*)$", re.I)
+_GREET = re.compile(r"^(hi|hello|hey|dear|good (?:morning|afternoon|evening|day)|hallo|liebe[r]?|guten (?:tag|morgen|abend)|moin|servus|"
+                    r"grüß gott|sehr geehrte|buongiorno|buonasera|salve|ciao|gentile|bonjour|bonsoir|hola|buenos días|"
+                    r"buenas tardes|estimad[oa]s?)\b[^\n]{0,40}$", re.I)
+_TOWN = r"([A-ZÄÖÜ][a-zäöüß]+(?:[ -][A-ZÄÖÜ][a-zäöüß]+)?)"
+
+# their wish at the top of the mail -> our line right after the greeting. {N} is their own noun (week, morning, ...)
+_WELL = {
+    "en": (re.compile(r"hope (?:your (week|day|morning|afternoon|evening|weekend)(?:['’]s| is| has been) (?:going|been) (?:well|good|great)"
+                      r"|you(?:['’]re| are) having a (?:good|great|nice|lovely) (week|day|morning|afternoon|evening|weekend)"
+                      r"|you(?:['’]re| are) (?:doing )?well|all is well)", re.I),
+           ("All good here, thanks, I hope your {N} is going well too.",
+            "Thanks, the {N} is going well here, and I hope yours is too.",
+            "My {N} is going fine, thanks for asking, and I hope yours is as well."),
+           ("All good here, thanks, I hope the same goes for you.", "Doing well, thanks for asking, I hope you are too.")),
+    "de": (re.compile(r"hoffe,? (?:es geht ihnen gut|sie hatten ein(?:en)? (?:schönes|gutes|guten|erholsames) (wochenende|start in die woche))|"
+                      r"hoffe,? (?:bei ihnen ist alles (?:gut|in ordnung))", re.I),
+           ("danke der Nachfrage, hier ist alles bestens, ich hoffe, bei Ihnen auch.",),
+           ("danke der Nachfrage, hier ist alles bestens, ich hoffe, bei Ihnen auch.",
+            "vielen Dank, hier läuft alles gut, ich hoffe, bei Ihnen ebenso.")),
+    "it": (re.compile(r"spero (?:che )?(?:stiate|stia|vada|tutto) (?:tutto )?bene", re.I), (),
+           ("Qui tutto bene, grazie, spero anche da voi.",)),
+    "fr": (re.compile(r"j['’]espère que (?:vous allez bien|tout va bien)", re.I), (),
+           ("Tout va bien de notre côté, merci, j'espère que vous aussi.",)),
+    "es": (re.compile(r"espero que (?:esté[n]?|se encuentre[n]?|todo vaya|todo esté) (?:muy )?bien", re.I), (),
+           ("Por aquí todo bien, gracias, espero que ustedes también.",)),
+}
+_RUSH = {
+    "en": (re.compile(r"(?:sorry|apologies) for the (rush|short notice|late (?:request|notice))", re.I),
+           ("No worries about the {N}.", "No problem at all on the {N}.")),
+    "de": (re.compile(r"entschuldigen sie (?:bitte )?die (eile|kurzfristige anfrage|kurzfristigkeit)", re.I),
+           ("kein Problem, dafür sind wir da.",)),
+}
+# their parting wish -> our last line. Group 1 is repeated in their own words.
+_WISH = {
+    "en": (re.compile(r"\bhave an? ((?:lovely|nice|great|good|wonderful|pleasant) (?:day|evening|weekend|week|afternoon|rest of the (?:day|week)))(!?)", re.I),
+           "Have a {W} too"),
+    "de": (re.compile(r"\b(einen schönen tag|einen schönen abend|ein schönes wochenende|einen schönen feierabend|eine schöne woche)(?: noch)?(!?)", re.I),
+           "Ihnen auch {W}"),
+    "it": (re.compile(r"\b(buona giornata|buona serata|buon lavoro|buon fine settimana|buon weekend)(!?)", re.I), "{W} anche a voi"),
+    "fr": (re.compile(r"\b(bonne journée|bonne soirée|bon week-end|bonne fin de journée|bonne semaine)( ?!)?", re.I), "{W} à vous aussi"),
+    "es": (re.compile(r"\b(buen día|buena tarde|buen fin de semana|feliz día|buena semana)(!?)", re.I), "Igualmente, {W}"),
+}
+# greetings from their town -> our sign-off line goes back there
+_FROM = {
+    "en": (re.compile(r"\b(?:greetings|regards|wishes) from " + _TOWN), ("Best regards to {T}", "Greetings back to {T}", "Kind regards to {T}")),
+    "de": (re.compile(r"\b[Gg]r(?:ü|ue)(?:ß|ss)en? aus " + _TOWN), ("Viele Grüße zurück nach {T}", "Beste Grüße nach {T}")),
+    "it": (re.compile(r"\b[Ss]alut[io] da " + _TOWN), ("Un caro saluto a {T}",)),
+}
+_NOT_A_TOWN = {"The", "Our", "All", "Us", "Me", "Germany", "Deutschland", "Der", "Dem", "Uns"}
+
+
+def own_text(body):
+    """The customer's own words: a forwarded or quoted chain below is cut."""
+    out = []
+    for line in (body or "").split("\n"):
+        if _QUOTED.match(line):
+            break
+        out.append(line)
+    return "\n".join(out)
+
+
+def signed_name(body):
+    """The first name the customer signed with: humanize/'s reader (Riky), on their own text only, so the sign-off
+    of a forwarded mail below is never taken for theirs."""
+    try:
+        import humanize
+        return humanize.signed_name(own_text(body))
+    except Exception:
+        return None
+
+
+def cues(body, lang):
+    """What the customer wrote as a person, read from their own text -> {"well": noun or "", "rush": ..., "wish": [words, "!"],
+    "town": ..., "cheers": True}. Empty dict = they wrote nothing personal, so we add nothing personal."""
+    text, out = own_text(body), {}
+    if lang in _WELL:
+        m = _WELL[lang][0].search(text)
+        if m:
+            out["well"] = (next((g for g in m.groups() if g), "") or "").lower()
+    if lang in _RUSH:
+        m = _RUSH[lang][0].search(text)
+        if m:
+            out["rush"] = m.group(1).lower()
+    if lang in _WISH:
+        m = _WISH[lang][0].search(text)
+        if m:
+            out["wish"] = [m.group(1).lower(), "!" if (m.group(2) or "").strip() else "."]
+    if lang in _FROM:
+        m = _FROM[lang][0].search(text)
+        if m and m.group(1).split()[0] not in _NOT_A_TOWN:
+            out["town"] = m.group(1)
+    if lang == "en" and re.search(r"^\s*cheers\b[ ,!]*$", text, re.I | re.M):
+        out["cheers"] = True
+    return out
+
+
+def mix(salt, thread_id):
+    """A well mixed number per (purpose, thread). crc32 of "open:1", "open:2", "open:3" lands on the same variant."""
+    return int(hashlib.md5(("%s:%s" % (salt, thread_id)).encode()).hexdigest()[:8], 16)
+
+
+def _pick(options, thread_id, salt):
+    return options[mix(salt, thread_id) % len(options)]
+
+
+def mirror(body, found, lang, thread_id=0):
+    """Put our answers to their personal lines into a finished body (greeting is line 0, our 3 signature lines last).
+    A line the model already wrote itself is not doubled."""
+    if not found:
+        return body
+    lines = body.split("\n")
+    if len(lines) < 6 or lines[1].strip():
+        return body
+    head, sign = lines[:-4], lines[-4:]                      # sign = ["", sign-off, signer, team]
+    text = "\n".join(head[2:]).lower()
+    first = None
+    if "well" in found and lang in _WELL and not re.search(r"\b(hope|hoffe|spero|espère|espero)\b", text):
+        named, plain = _WELL[lang][1], _WELL[lang][2]
+        first = _pick(named, thread_id, "well").replace("{N}", found["well"]) if found["well"] and named else _pick(plain, thread_id, "well")
+    elif "rush" in found and lang in _RUSH and not re.search(r"\b(no worries|no problem|kein problem)\b", text):
+        first = _pick(_RUSH[lang][1], thread_id, "rush").replace("{N}", found["rush"])
+    if first and len(head) > 2:
+        rest = head[2]
+        head[2] = first + " " + rest[:1].upper() + rest[1:]
+    if "wish" in found and lang in _WISH and found["wish"][0] not in text:
+        words, mark = found["wish"]
+        if lang == "de":                                     # the noun is the last word: "einen schönen Tag"
+            words = re.sub(r"(\w+)$", lambda m: m.group(1).capitalize(), words)
+        line = _WISH[lang][1].replace("{W}", words)
+        head += ["", line[:1].upper() + line[1:] + mark]
+    if "town" in found and lang in _FROM:
+        sign[1] = _pick(_FROM[lang][1], thread_id, "town").replace("{T}", found["town"])
+    elif found.get("cheers") and lang == "en":
+        sign[1] = "Cheers"
+    return "\n".join(head + sign)
+
+
+_DE_LOWER = {"Für", "Ich", "Wir", "Gerne", "Danke", "Vielen", "Die", "Der", "Das", "Hier", "Kurz", "Mit", "Bei", "Zu",
+             "Auch", "Gute", "Anbei", "Wie", "Nach", "Am", "Schön"}
+
+
+_BARE = re.compile(r"^(hi|hello|hey|hallo|guten tag|guten morgen|buongiorno|buonasera|salve|bonjour|bonsoir|hola|buenos días)\s*,$", re.I)
+
+
+def polish(body, lang, hello="", name=None):
+    """What a person gets right without thinking: a greeting line (the model sometimes starts with the answer),
+    the name when they signed with one and the model wrote only "Hi,", and the first word after the greeting:
+    capital in English, French and Spanish, lower case in German ("Hallo Katrin,\\n\\nfür Ihre ...").
+    A WRONG name and doubled units are humanize/'s job (core.finalize), not ours."""
+    lines = body.split("\n")
+    first = lines[0].strip() if lines else ""
+    if hello and first and not _GREET.match(first) and not (first.endswith(",") and len(first.split()) <= 4):
+        lines = [hello, ""] + lines
+    elif name and _BARE.match(first):
+        lines[0] = "%s %s," % (first.rstrip(" ,"), name)
+    if len(lines) > 2 and lines[0].rstrip().endswith(",") and not lines[1].strip() and lines[2]:
+        first = lines[2].split(" ", 1)[0]
+        if lang in ("en", "fr", "es") and first[:1].islower():
+            lines[2] = lines[2][:1].upper() + lines[2][1:]
+        elif lang == "de" and first in _DE_LOWER:
+            lines[2] = lines[2][:1].lower() + lines[2][1:]
+    return "\n".join(lines)
+
+
+CARD_OPEN = (
+    "the first sentence after the greeting gives the answer itself, airline and price; their details come after it",
+    "the first sentence after the greeting is about their goods and where they are going, in your own words; the price comes in the second sentence",
+    "the first sentence after the greeting says you have looked at their lane; the price comes in the second sentence",
+    "the first sentence after the greeting confirms what they asked for (cheapest or fastest, pickup at their site or their own delivery); then the price",
+)
+CARD_CLOSE = (
+    "the last line is a short question: should you book it",
+    "the last line says a one-line yes is enough and you will book it",
+    "the last line says you will book it as soon as they give the go-ahead",
+    "the last line asks if that works for them and offers to book right away",
+    "the last line tells them to just say the word and you will get it booked",
+)
+
+
+def card_index(thread_id):
+    return mix("card-open", thread_id) % len(CARD_OPEN), mix("card-close", thread_id) % len(CARD_CLOSE)
+
+
+def style_card(thread_id):
+    o, c = card_index(thread_id)
+    return ("Shape of this reply: greeting line with their first name; %s; one sentence that picks up what they told you "
+            "(pickup at their site = our truck, in the price; their own delivery; the ready date); %s, in its own "
+            "paragraph. Use {AIRLINE}, {PRICE} and {TRANSIT_DAYS}. Your own words, in the customer's language."
+            % (CARD_OPEN[o], CARD_CLOSE[c]))
 
 
 # ---------------------------------------------------------------------------------------------------- learning

@@ -10,7 +10,7 @@ from . import lang as langmod, quality, human
 
 SIGNER = os.environ.get("SIGNER", "Lena Hofmann")   # the person who signs our mails (jury: most human email)
 
-SYSTEM = """You work at an air freight forwarder in Germany. Read the customer's email and answer with JSON only:
+SYSTEM_HEAD = """You work at an air freight forwarder in Germany. Read the customer's email and answer with JSON only:
 {
  "origin": IATA code of the departure airport (usually FRA, MUC, DUS, HAM, STR or CGN, but use whatever airport the customer names) or null if not given,
  "destination": IATA code of the destination airport or null,
@@ -31,7 +31,11 @@ SYSTEM = """You work at an air freight forwarder in Germany. Read the customer's
 }
 Do not calculate anything. Copy numbers as written (convert units to cm and kg only).
 Several "lots" or pieces that the customer wants ONE combined all-in price for, as a single consignment, are ONE shipment: add their weights and volumes into weight_kg/volume_cbm (or list them in pieces), multi_shipment stays false. multi_shipment is only true when the customer wants separate quotes for different origin/destination routes.
-The reply: write it in the language of the customer's email, never any other (an English email gets an English reply, a German email a German reply). Greet with the sender's FIRST name only (from how they signed, e.g. "Hi Anna", "Hallo Katrin"); never add Frau, Herr, Mr or Ms. If they signed only with a company name, a role, initials, or gave no name, greet warmly WITHOUT a name ("Hi there" / "Hello" / "Guten Tag") - NEVER greet with the company name (never "Hi Auer" for "Auer Maschinenbau").
+"""
+
+# The voice of the reply. V1 is the text that ran until 21 Nov 18:00 (clean, but every mail had the same shape and the
+# jury never picked it). V2 answers the person, not only the data. HUMAN_VOICE=0 goes back to V1.
+VOICE_V1 = """The reply: write it in the language of the customer's email, never any other (an English email gets an English reply, a German email a German reply). Greet with the sender's FIRST name only (from how they signed, e.g. "Hi Anna", "Hallo Katrin"); never add Frau, Herr, Mr or Ms. If they signed only with a company name, a role, initials, or gave no name, greet warmly WITHOUT a name ("Hi there" / "Hello" / "Guten Tag") - NEVER greet with the company name (never "Hi Auer" for "Auer Maschinenbau").
 Write like an experienced, friendly forwarder answering between two calls: plain words, no lists, no headings.
 Mirror the customer: if they wrote one or two lines, answer in two or three sentences; if they wrote a long mail, at most five.
 If they wrote casually ("Hi", "Hey", first name, no greeting), be casual and use contractions; if formal ("Dear Sir or Madam",
@@ -49,6 +53,36 @@ End with one easy next step: they can simply reply to book it.
 If there are several shipments, do NOT use {PRICE}, {AIRLINE} or {TRANSIT_DAYS}: put {PRICE_TABLE} on its own line where the per-shipment prices go and state the all-in total with {TOTAL}.
 Never write a number for the price yourself. Do NOT write any closing or signature (no "Best regards", no name): our system adds it. Never use the customer's name or signature as ours.
 Only state facts that are in the customer's email or behind our placeholders. Never mention deadlines, cut-off or drop-off times, customs, insurance, packaging, documents or dates of your own, and write no number the customer did not write."""
+
+VOICE = """The reply: write it in the language of the customer's email, never any other (an English email gets an English reply, a German email a German reply). Greet with the sender's FIRST name only (from how they signed, e.g. "Hi Anna", "Hallo Katrin"); never add Frau, Herr, Mr or Ms. If they signed only with a company name, a role, initials, or gave no name, greet warmly WITHOUT a name ("Hi there" / "Hello" / "Guten Tag") - NEVER greet with the company name (never "Hi Auer" for "Auer Maschinenbau").
+You are an experienced, friendly forwarder typing ONE answer to THIS person between two calls. A jury compares many quotes for the same request and picks the one a real person clearly wrote; a form letter loses. Plain words, no lists, no headings.
+- Show you read it, but do not read their data back to them. Name the goods in their words and pick up ONE or TWO things they told you: the ready date the way people say it ("the 28th", "am 2. Dezember", never "2026-11-28"), that they bring the goods to the airport themselves (only if they say so), one air waybill for all lots. If they ask for pickup at their site, WE send the truck: say our truck collects there and it is in the price, never that they arrange it. Never list weight, volume and piece count in a row. If they ask something the price does not answer (a departure date, for example), say in one clause that you will check and come back on it.
+- Their small talk ("hope your week is going well", "have a lovely day", greetings from their town) is answered by our system in its own line: do not answer it yourself and do not wish them anything.
+- Sound like speech. Do not open with "For your shipment of ..." and do not squeeze everything into one long sentence: two or three short sentences of different shape. Never start with a thank-you formula; start with their shipment or with the answer.
+- Mirror the customer: if they wrote one or two lines, answer in two or three sentences; if they wrote a long mail, at most five. Stay under 75 words. If they wrote casually ("Hi", "Hey", first name, no greeting), be casual and use contractions; if formal ("Dear Sir or Madam", "Sehr geehrte"), stay formal but warm.
+- Write as a native of their language would. English, French, Spanish: the first word after the greeting line has a capital. German: always "Sie", lower case after the greeting line, everyday business German ("Laufzeit", "Abholung", "all-in"). Italian: "voi" for the company, "tutto incluso", "giorni di transito". French: "vous", "tout compris", "jours de transit". Spanish: "usted", "todo incluido", "días de tránsito".
+Three examples of the voice (placeholders as in your reply; never copy the wording, every mail gets its own):
+  Customer: "Hi, price for 300 kg MUC to JFK please, cheapest. Tom"
+  Reply: "Hi Tom,\n\n{AIRLINE} is the cheapest on {ROUTE} right now: {PRICE} all-in for your {WEIGHT}, about {TRANSIT_DAYS} days.\n\nShall I book it?"
+  Customer: "Hey, we've got 4 crates of pump spares, 410 kg, ready on 2026-12-03, and we'd drive them to HAM ourselves. What's the fastest way to Chicago? Thanks a million, Jonas"
+  Reply: "Hi Jonas,\n\nYour four crates of pump spares can fly {ROUTE} with {AIRLINE}, the fastest I can get: around {TRANSIT_DAYS} days, {PRICE} all-in. I've noted the 3rd as the ready date and that you bring them to the airport yourselves.\n\nA quick yes from you and I'll book it."
+  Customer: "Sehr geehrte Damen und Herren, wir benötigen ein Angebot für 2 Paletten Maschinenteile, 640 kg, Abholung 70565, nach Shanghai, möglichst schnell."
+  Reply: "Guten Tag,\n\nIhre zwei Paletten Maschinenteile ({WEIGHT}) bekommen wir am schnellsten mit {AIRLINE} nach Shanghai: {PRICE} all-in, die Abholung bei Ihnen ist enthalten, Laufzeit rund {TRANSIT_DAYS} Tage.\n\nWenn das für Sie passt, genügt eine kurze Antwort und ich buche."
+State one all-in price using exactly the placeholder {PRICE}, and name {AIRLINE} and {TRANSIT_DAYS} days transit: all three placeholders must be in the reply. {ROUTE} (filled as "Munich to New York") and {WEIGHT} (filled as "300 kg", the unit is included, never write "kg" after it) are optional.
+End with one easy next step: they can simply reply to book it. A line in square brackets under the customer's mail gives the shape for THIS reply; follow it in your own words.
+If there are several shipments, do NOT use {PRICE}, {AIRLINE} or {TRANSIT_DAYS}: put {PRICE_TABLE} on its own line where the per-shipment prices go and state the all-in total with {TOTAL}.
+Never write a number for the price yourself. Do NOT write any closing or signature (no "Best regards", no name): our system adds it. Never use the customer's name or signature as ours.
+Never use: "I hope this email finds you well", "Thank you for reaching out", "Certainly", "delighted", "Please do not hesitate", "valued customer", exclamation marks in a row, emojis.
+Only state facts that are in the customer's email or behind our placeholders. Never mention deadlines, cut-off or drop-off times, customs, insurance, packaging, documents or dates of your own, never promise space, a direct flight or a departure, and write no number the customer did not write."""
+
+HUMAN_VOICE = os.environ.get("HUMAN_VOICE", "1") != "0"     # 0 = the reply prompt and shape as before 21 Nov 18:00
+SYSTEM_V1 = SYSTEM_HEAD + VOICE_V1
+SYSTEM = SYSTEM_HEAD + VOICE
+
+
+def system_prompt():
+    return SYSTEM if HUMAN_VOICE else SYSTEM_V1
+
 
 # USD per 1M tokens (input, output). Only used for our own log; 5U measures the real cost.
 PRICES = {"gpt-4o-mini": (0.15, 0.60)}
@@ -81,42 +115,70 @@ CITY = {"FRA": "Frankfurt", "MUC": "Munich", "DUS": "Düsseldorf", "HAM": "Hambu
 CITY_DE = {"MUC": "München", "CGN": "Köln", "CAI": "Kairo", "MEX": "Mexiko-Stadt", "NRT": "Tokio", "PEK": "Peking",
            "SIN": "Singapur", "RUH": "Riad"}
 
-HUMAN = {
-    "en": [
-        "{HELLO}\n\nthanks for sending the details for {ROUTE}. For your {WEIGHT} we can do {PRICE} all-in with {AIRLINE}, "
-        "around {TRANSIT_DAYS} days in transit.\n\nIf that works for you, just reply to this mail and I'll book it right away.\n\n"
-        "Best regards\n{SIGNER}\nAir Export",
-        "{HELLO}\n\nI've checked {ROUTE} for your {WEIGHT}: the best option right now is {AIRLINE} at {PRICE} all-in, "
-        "with about {TRANSIT_DAYS} days in transit.\n\nShall I go ahead? A short reply is enough and I'll take care of the booking.\n\n"
-        "Kind regards\n{SIGNER}\nAir Export",
-        "{HELLO}\n\ngood news on {ROUTE}: we can move your {WEIGHT} with {AIRLINE} for {PRICE} all-in, "
-        "transit roughly {TRANSIT_DAYS} days.\n\nLet me know and I'll get it booked for you.\n\n"
-        "Best wishes\n{SIGNER}\nAir Export",
-    ],
-    "de": [
-        "{HELLO}\n\ndanke für Ihre Anfrage {ROUTE}. Für Ihre {WEIGHT} können wir {PRICE} all-in mit {AIRLINE} anbieten, "
-        "Laufzeit etwa {TRANSIT_DAYS} Tage.\n\nWenn das für Sie passt, antworten Sie einfach kurz und ich buche direkt.\n\n"
-        "Viele Grüße\n{SIGNER}\nLuftfracht Export",
-        "{HELLO}\n\nich habe {ROUTE} für Ihre {WEIGHT} geprüft: Am besten passt aktuell {AIRLINE} mit {PRICE} all-in, "
-        "rund {TRANSIT_DAYS} Tage Laufzeit.\n\nSoll ich das so buchen? Eine kurze Antwort genügt.\n\n"
-        "Beste Grüße\n{SIGNER}\nLuftfracht Export",
-    ],
-    "it": [
-        "{HELLO}\n\ngrazie per la richiesta {ROUTE}. Per i vostri {WEIGHT} possiamo offrire {PRICE} tutto incluso con {AIRLINE}, "
-        "tempo di transito circa {TRANSIT_DAYS} giorni.\n\nSe va bene, basta una breve risposta e prenoto subito.\n\n"
-        "Cordiali saluti\n{SIGNER}\nAir Export",
-    ],
-    "fr": [
-        "{HELLO}\n\nmerci pour votre demande {ROUTE}. Pour vos {WEIGHT}, nous pouvons proposer {PRICE} tout compris avec {AIRLINE}, "
-        "transit d'environ {TRANSIT_DAYS} jours.\n\nSi cela vous convient, répondez simplement à ce mail et je réserve tout de suite.\n\n"
-        "Cordialement\n{SIGNER}\nAir Export",
-    ],
-    "es": [
-        "{HELLO}\n\ngracias por su solicitud {ROUTE}. Para sus {WEIGHT} podemos ofrecer {PRICE} todo incluido con {AIRLINE}, "
-        "tránsito de unos {TRANSIT_DAYS} días.\n\nSi le parece bien, responda a este correo y lo reservo enseguida.\n\n"
-        "Saludos cordiales\n{SIGNER}\nAir Export",
-    ],
+CITY_LOCAL = {
+    "de": CITY_DE,
+    "it": {"FRA": "Francoforte", "MUC": "Monaco di Baviera", "HAM": "Amburgo", "STR": "Stoccarda", "CGN": "Colonia",
+           "PEK": "Pechino", "MEX": "Città del Messico", "ICN": "Seul", "GRU": "San Paolo", "RUH": "Riad"},
+    "fr": {"FRA": "Francfort", "HAM": "Hambourg", "PEK": "Pékin", "MEX": "Mexico", "SIN": "Singapour", "ICN": "Séoul",
+           "DXB": "Dubaï", "RUH": "Riyad"},
+    "es": {"FRA": "Fráncfort", "MUC": "Múnich", "HAM": "Hamburgo", "CGN": "Colonia", "PEK": "Pekín", "JFK": "Nueva York",
+           "MEX": "Ciudad de México", "SIN": "Singapur", "ICN": "Seúl", "NRT": "Tokio", "DXB": "Dubái",
+           "JNB": "Johannesburgo", "RUH": "Riad", "DEL": "Nueva Delhi"},
 }
+
+# Our own mails, used when the model's text fails the gate. One opening + one closing, picked separately per thread,
+# so two requests rarely read the same. Written the way a native writes: German starts lower case after the greeting,
+# English, French and Spanish with a capital; {ROUTE} always follows a word it fits behind ("von A nach B").
+OPENING = {
+    "en": ["I've had a look at {ROUTE} for your {WEIGHT}. {AIRLINE} is the best fit right now: {PRICE} all-in, "
+           "about {TRANSIT_DAYS} days in transit.",
+           "Good news on {ROUTE}: your {WEIGHT} can go with {AIRLINE} for {PRICE} all-in, roughly {TRANSIT_DAYS} days in transit.",
+           "Quick answer on {ROUTE}: {PRICE} all-in for your {WEIGHT} with {AIRLINE}, around {TRANSIT_DAYS} days in transit.",
+           "I've compared the options on {ROUTE}. For your {WEIGHT} I'd go with {AIRLINE}: {PRICE} all-in and "
+           "about {TRANSIT_DAYS} days in transit."],
+    "de": ["für Ihre {WEIGHT} {ROUTE} passt aktuell {AIRLINE} am besten: {PRICE} all-in, Laufzeit rund {TRANSIT_DAYS} Tage.",
+           "ich habe die Raten {ROUTE} verglichen: {AIRLINE} liegt für Ihre {WEIGHT} bei {PRICE} all-in, "
+           "mit etwa {TRANSIT_DAYS} Tagen Laufzeit.",
+           "kurze Rückmeldung zu Ihrer Anfrage {ROUTE}: {AIRLINE} fliegt Ihre {WEIGHT} für {PRICE} all-in, "
+           "die Laufzeit liegt bei rund {TRANSIT_DAYS} Tagen."],
+    "it": ["ho verificato la tratta {ROUTE} per i vostri {WEIGHT}: al momento la soluzione migliore è {AIRLINE}, "
+           "{PRICE} tutto incluso, con circa {TRANSIT_DAYS} giorni di transito.",
+           "per i vostri {WEIGHT} {ROUTE} posso proporvi {AIRLINE} a {PRICE} tutto incluso, "
+           "con un transito di circa {TRANSIT_DAYS} giorni."],
+    "fr": ["J'ai regardé le trajet {ROUTE} pour vos {WEIGHT} : la meilleure option en ce moment est {AIRLINE}, "
+           "à {PRICE} tout compris, avec environ {TRANSIT_DAYS} jours de transit.",
+           "Pour vos {WEIGHT} {ROUTE}, je peux vous proposer {AIRLINE} à {PRICE} tout compris, "
+           "soit environ {TRANSIT_DAYS} jours de transit."],
+    "es": ["He revisado la ruta {ROUTE} para sus {WEIGHT}: la mejor opción ahora mismo es {AIRLINE}, por {PRICE} "
+           "todo incluido, con unos {TRANSIT_DAYS} días de tránsito.",
+           "Para sus {WEIGHT} {ROUTE} le puedo ofrecer {AIRLINE} por {PRICE} todo incluido; el tránsito es de "
+           "unos {TRANSIT_DAYS} días."],
+}
+CLOSING = {
+    "en": ["If that works for you, just reply and I'll book it.", "Shall I go ahead? A short yes is enough.",
+           "Give me a quick yes and I'll get it booked.", "Happy to book it as soon as you give me the go-ahead."],
+    "de": ["Wenn das für Sie passt, genügt eine kurze Antwort und ich buche.", "Soll ich das so buchen? Ein kurzes Ja reicht.",
+           "Geben Sie mir einfach kurz Bescheid, dann buche ich direkt."],
+    "it": ["Se per voi va bene, basta una riga di conferma e procedo con la prenotazione.",
+           "Procedo con la prenotazione? Mi basta un vostro ok.",
+           "Fatemi sapere e prenoto subito."],
+    "fr": ["Si cela vous convient, un simple retour de mail suffit et je lance la réservation.",
+           "Souhaitez-vous que je réserve ? Un simple oui par retour de mail suffit.",
+           "Dites-moi si cela vous convient et je réserve tout de suite."],
+    "es": ["Si le encaja, basta con que me responda a este correo y lo reservo.",
+           "¿Lo reservo? Con un sí por respuesta es suficiente.",
+           "Dígame si le parece bien y lo reservo enseguida."],
+}
+HUMAN = {l: ["{HELLO}\n\n%s\n\n%s" % (o, c) for o in OPENING[l] for c in CLOSING[l]] for l in OPENING}
+
+
+def own_template(lang, thread_id):
+    """Opening and closing picked by two different hashes of the thread: same thread, same mail; next thread, another one."""
+    o = human.mix("open", thread_id) % len(OPENING[lang])
+    c = human.mix("close", thread_id) % len(CLOSING[lang])
+    return HUMAN[lang][o * len(CLOSING[lang]) + c]
+
+
 ROUTE_FMT = {"en": "%s to %s", "de": "von %s nach %s", "it": "da %s a %s", "fr": "de %s à %s", "es": "de %s a %s"}
 NO_ROUTE = {"en": "for your shipment", "de": "für Ihre Sendung", "it": "per la vostra spedizione", "fr": "pour votre envoi",
             "es": "para su envío"}
@@ -134,7 +196,7 @@ def reply_lang(fields):
 
 def _route(fields, lang):
     o, d = (fields.get("origin") or "").upper(), (fields.get("destination") or "").upper()
-    names = dict(CITY, **CITY_DE) if lang == "de" else CITY
+    names = dict(CITY, **CITY_LOCAL.get(lang, {}))
     if not (o and d):
         return "your shipment" if lang == "en" else "Ihre Sendung" if lang == "de" else NO_ROUTE[lang]
     return ROUTE_FMT[lang] % (names.get(o, o), names.get(d, d))
@@ -145,6 +207,8 @@ def _weight(fields, lang):
     if not w:
         return NO_WEIGHT[lang]
     txt = ("{:,.0f}".format(float(w)) if float(w) == int(float(w)) else "{:,.1f}".format(float(w)))
+    if lang == "fr":                                         # "1 805 kg" would read as two numbers: no separator
+        return txt.replace(",", "").replace(".", ",") + " kg"
     return (txt.replace(",", "X").replace(".", ",").replace("X", ".") + " kg") if lang != "en" else (txt + " kg")
 
 
@@ -161,7 +225,12 @@ def _own_signature(body, lang, thread_id):
     """Cut whatever sign-off the model wrote (it once signed with the CUSTOMER's name) and add ours."""
     lines = body.rstrip().split("\n")
     for i in range(len(lines) - 1, max(len(lines) - 6, 0) - 1, -1):
-        if _CLOSING.search(lines[i]):
+        rest = [l for l in lines[i + 1:] if l.strip()]
+        # a sign-off is short and only a name or a team follows it. "Thanks, all good here ..." at the top or a
+        # "Viele Grüße zurück nach Kiel." in the text is not one.
+        if (_CLOSING.search(lines[i]) and len(lines[i].split()) <= 4 and len(rest) <= 2
+                and all(len(l.split()) <= 4 for l in rest)
+                and not re.search(r"\b(back|zurück|too|auch|ebenfalls)\b", lines[i], re.I)):
             lines = lines[:i]
             break
     sign = SIGN_OFF[lang][zlib.crc32(str(thread_id).encode()) % len(SIGN_OFF[lang])]
@@ -171,10 +240,9 @@ def _own_signature(body, lang, thread_id):
 
 def _fill(template, best, fields, customer, thread_id, lang):
     if not template or "{PRICE}" not in template:
-        variants = HUMAN[lang]
-        template = variants[zlib.crc32(str(thread_id).encode()) % len(variants)]
+        template = own_template(lang, thread_id)
     from booking.replies import first_name
-    name = first_name(customer)
+    name = fields.get("customer_first_name") or first_name(customer)     # the name they signed with, never the company
     hello = HELLO[lang][0] % name if name else HELLO[lang][1]
     vals = {"PRICE": "%s %s" % (best["total"], best["currency"]), "AIRLINE": best["airline"],
             "TRANSIT_DAYS": str(best["transit_days"]), "ROUTE": _route(fields, lang), "WEIGHT": _weight(fields, lang),
@@ -182,13 +250,35 @@ def _fill(template, best, fields, customer, thread_id, lang):
     body = re.sub(r"\{(PRICE|AIRLINE|TRANSIT_DAYS|ROUTE|WEIGHT|SIGNER|HELLO)\}", lambda m: vals[m.group(1)], template)
     if re.search(r"\{[A-Z_]+\}", body):                      # unknown placeholder from the model: use our own text
         return _fill("", best, fields, customer, thread_id, lang)
+    body = human.polish(body, lang, hello, fields.get("customer_first_name"))
     body = _add_expert_note(body, expert_note(best, fields, lang), vals["PRICE"])
     return _own_signature(body, lang, thread_id)
 
 
 def _kg(x, lang):
     txt = "{:,.0f}".format(float(x))
-    return txt.replace(",", ".") if lang == "de" else txt
+    return txt if lang == "en" else txt.replace(",", "") if lang == "fr" else txt.replace(",", ".")
+
+
+# The expert note in the customer's language (an English sentence in an Italian mail is a robot tell).
+# Per language: (the next weight break was used: billed kg, chargeable kg; volume decides: cbm, chargeable kg)
+NOTE = {
+    "en": ("I've billed it at %s kg rather than %s kg, since the next weight bracket is cheaper per kilo "
+           "and that brings your total down.",
+           "Because of the volume (%s cbm), the chargeable weight here is %s kg."),
+    "de": ("Ich habe mit %s kg statt %s kg gerechnet, weil die nächste Gewichtsstufe pro Kilo günstiger ist "
+           "und es für Sie so insgesamt billiger wird.",
+           "Wegen des Volumens (%s cbm) zählt hier das Volumengewicht von %s kg."),
+    "it": ("Ho calcolato su %s kg anziché %s kg: lo scaglione di peso superiore costa meno al chilo "
+           "e così il vostro totale si abbassa.",
+           "Dato il volume (%s cbm), qui conta il peso tassabile di %s kg."),
+    "fr": ("J'ai calculé sur %s kg au lieu de %s kg : la tranche de poids supérieure est moins chère au kilo, "
+           "ce qui fait baisser votre total.",
+           "Vu le volume (%s cbm), c'est le poids taxable de %s kg qui s'applique."),
+    "es": ("Lo he calculado con %s kg en lugar de %s kg: el siguiente tramo de peso sale más barato por kilo "
+           "y así baja su total.",
+           "Por el volumen (%s cbm), aquí se aplica el peso tasable de %s kg."),
+}
 
 
 def expert_note(best, fields, lang):
@@ -203,17 +293,11 @@ def expert_note(best, fields, lang):
     if actual <= 0:
         return ""
     chargeable = max(actual, volume * 167)
+    breaks, bulky = NOTE.get(lang, NOTE["en"])
     if billed > chargeable + 0.5:
-        if lang == "de":
-            return ("Ich habe mit %s kg statt %s kg gerechnet, weil die nächste Gewichtsstufe pro Kilo günstiger ist "
-                    "und es für Sie so insgesamt billiger wird." % (_kg(billed, lang), _kg(chargeable, lang)))
-        return ("I've billed it at %s kg rather than %s kg, since the next weight bracket is cheaper per kilo "
-                "and that brings your total down." % (_kg(billed, lang), _kg(chargeable, lang)))
+        return breaks % (_kg(billed, lang), _kg(chargeable, lang))
     if volume * 167 > actual * 1.15:
-        if lang == "de":
-            return "Wegen des Volumens (%s cbm) zählt hier das Volumengewicht von %s kg." % (
-                ("%.2f" % volume).replace(".", ","), _kg(chargeable, lang))
-        return "Because of the volume (%.2f cbm), the chargeable weight here is %s kg." % (volume, _kg(chargeable, lang))
+        return bulky % (("%.2f" % volume) if lang == "en" else ("%.2f" % volume).replace(".", ","), _kg(chargeable, lang))
     return ""
 
 
@@ -232,6 +316,8 @@ def final_reply(template, best, fields, customer="", thread_id=0):
     reasons == [] : the text went out as written. Otherwise the model's text failed for these reasons and the body
     is one of our own human templates instead (same price). No gateway call."""
     lang = reply_lang(fields)
+    if fields.get("reply_ok") is False:                      # safe_reply already replaced the model's text: let the
+        template = ""                                        # thread pick one of our own mails, not always the first
     names = [n for n in re.split(r"[._\-+]", (customer or "").split("@")[0]) if len(n) > 3]
     plain = _fill(template, best, fields, customer, thread_id, lang)
     reasons = quality.check(plain, lang, best, fields, customer, SIGNER, names)
@@ -240,6 +326,9 @@ def final_reply(template, best, fields, customer="", thread_id=0):
     try:                                                     # personal touch (llm/human.py): any error -> plain mail
         style = human.choose(fields, lang, thread_id)
         body = human.apply(plain, style, fields, lang)
+        if HUMAN_VOICE and fields.get("personal_cues") and human.HUMAN_STYLE not in human.STYLES:
+            # they wrote something personal: answering THAT is the touch, and no second line on top of it
+            body, style = human.mirror(plain, fields["personal_cues"], lang, thread_id), "mirror"
         if body != plain and quality.check(body, lang, best, fields, customer, SIGNER, names):
             body, style = plain, "control"                   # the touch must never cost us a clean mail
         fields["human_style"] = style
@@ -266,7 +355,8 @@ def safe_reply(text, lang="en", multi=False):
         return t, True
     if multi:
         return "", False                                    # pricing/multi.py uses its own fallback
-    return HUMAN[reply_lang({"language": lang})][0], False   # human fallback, same price
+    l = reply_lang({"language": lang})                       # one of our own mails, same price
+    return HUMAN[l][0] + "\n\n%s\n{SIGNER}\n%s" % (SIGN_OFF[l][0], TEAM.get(l, "Air Export")), False
 
 
 def _fill_places(fields, mail):
@@ -294,6 +384,10 @@ def _annotate(fields, mail, detected):
     fields["language_detected"] = detected
     fields["customer_numbers"] = quality.numbers(_text(mail))[:80]
     fields["customer_lines"] = quality.customer_lines(mail.get("body") or "")
+    fields["customer_dates"] = quality.date_forms(_text(mail))
+    fields["self_delivery"] = quality.self_delivery(human.own_text(mail.get("body") or ""))
+    fields["personal_cues"] = human.cues(mail.get("body") or "", reply_lang(fields))    # what they wrote as a person
+    fields["customer_first_name"] = human.signed_name(mail.get("body") or "")           # humanize/'s reading, chain cut
     return fields
 
 
@@ -387,11 +481,11 @@ def extract(mail):
     detected = langmod.detect(_text(mail))                  # counted in code, no call
     if config.LLM_FAKE:
         return _annotate(_fake(mail), mail, detected), {"fake": True}
-    hint = langmod.hint(detected)
-    user = "Subject: %s\n\n%s" % (mail["subject"], _clip(mail["body"]))
-    messages = [{"role": "system", "content": SYSTEM},
-                {"role": "user", "content": user + ("\n\n[%s]" % hint if hint else "")}]
     deadline, tid = _budget(mail), mail.get("thread_id")
+    hint = " ".join(x for x in (langmod.hint(detected), human.style_card(tid) if HUMAN_VOICE else "") if x)
+    user = "Subject: %s\n\n%s" % (mail["subject"], _clip(mail["body"]))
+    messages = [{"role": "system", "content": system_prompt()},
+                {"role": "user", "content": user + ("\n\n[%s]" % hint if hint else "")}]
     fields, data = _call_and_parse(messages, config.LLM_MAX_TOKENS, deadline, tid)
     if fields is None:                                   # truncated/invalid JSON: retry once with more room (rare; logged)
         fields, data2 = _call_and_parse(messages, config.LLM_MAX_TOKENS * 2, deadline, tid)
