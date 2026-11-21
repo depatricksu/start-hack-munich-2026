@@ -42,3 +42,10 @@ Price 45 (accepted = within 5% of best), LLM cost 40 (full at 0, zero at 0.10 US
 - 4 airlines serve only exotic destinations (ASU KTM PPT TNR ULN) and are priced by email: Zephyr Steppe, Himalaya Bridge, Lagoon Isles, Pampero.
 - Truckers are priced by email for the door-to-port leg.
 - Mailbox was empty before 16:00. Team mailbox `google@hackloop.mail`.
+
+## Pricing module (pricing/)
+- `python pricing/parse_tariffs.py` turns the 10 sheets into `pricing/tariffs.json` (158 lanes). Danube Wings is a photo and is transcribed by hand inside the script.
+- `from pricing.price import options, cheapest, fastest` prices a shipment from the table, no LLM and no network. Run from the repo root: `python -m pricing.price FRA LAX 120 0.9`.
+- Verified 21 Nov by an independent check of all 158 lanes (0 differences).
+- Not yet verified: whether the real tariff charges a weight at the next break when that is cheaper (Helix FRA-LAX 44.99 kg costs more than 45 kg). Tariffs are valid 1 to 30 Nov 2026 and the code ignores dates.
+- Portal rate reads are capped at 10 per minute, so use the table first and the portal only for the 15 portal airlines.
