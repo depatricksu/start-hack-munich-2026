@@ -44,7 +44,7 @@ class TestTouch(unittest.TestCase):
         body, _ = self.body("local", {"origin": "MUC", "destination": "JFK", "weight_kg": 300, "language": "de"}, TPL_DE)
         self.assertTrue(body.startswith("Servus Tom,"), body)
         body, _ = self.body("destination", {"origin": "MUC", "destination": "ORD", "weight_kg": 300, "language": "en"})
-        self.assertIn("the Windy City", body)
+        self.assertIn("the windy city", body.lower())       # one variant starts the sentence: "The Windy City it is, then."
 
     def test_moment(self):
         sat_evening = 1795280400  # 2026-11-21 18:00 Berlin
