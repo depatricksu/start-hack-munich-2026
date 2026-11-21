@@ -43,11 +43,13 @@ export type Session = {
 };
 
 export type EventRow = { id: number; ts: number; kind: string; data: Record<string, unknown> };
-export type MailRow = { id: number; sender: string; subject: string; body: string; received_at: number; route: string | null };
+// A file on a mail: the customer's (request as PDF / Word / voice message, packing list) or ours (the offer PDF).
+export type FileRef = { filename: string; bytes: number | null; type: string | null };
+export type MailRow = { id: number; sender: string; subject: string; body: string; received_at: number; route: string | null; files?: FileRef[] };
 
 export type ActionRow = { id: number; kind: string; body: string; created_at: number; done_at: number | null; result: string | null };
 
-export type SessionDetail = Session & { events: EventRow[]; mails: MailRow[]; actions: ActionRow[] };
+export type SessionDetail = Session & { events: EventRow[]; mails: MailRow[]; actions: ActionRow[]; reply_files: FileRef[] };
 
 export type Stats = {
   total: number;

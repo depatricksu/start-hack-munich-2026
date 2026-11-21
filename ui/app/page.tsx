@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { Countdown, LANG_FLAG, StatusChip, money } from "@/components/bits";
-import { EventRow, Option, Session, SessionDetail } from "@/lib/types";
+import { EventRow, FileRef, Option, Session, SessionDetail } from "@/lib/types";
 
 type Source = "live" | "demo";
 
@@ -79,6 +79,26 @@ function OptionsTable({ options, chosen }: { options: Option[]; chosen: Option |
         })}
       </tbody>
     </table>
+  );
+}
+
+// Files on a mail: the customer's request as PDF / Word / voice message, or the offer PDF on our reply.
+function Files({ files, ours = false }: { files?: FileRef[]; ours?: boolean }) {
+  if (!files || files.length === 0) return null;
+  const size = (b: number | null) => (b == null ? "" : b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(1)} KB` : `${(b / 1048576).toFixed(1)} MB`);
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {files.map((f, i) => (
+        <span key={i} title={f.type ?? undefined}
+          className={`inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs ${ours ? "border-emerald-200 bg-white text-emerald-800" : "border-zinc-200 bg-white text-zinc-700"}`}>
+          <span className={`rounded px-1 font-mono text-[10px] font-semibold uppercase ${ours ? "bg-emerald-100" : "bg-zinc-100"}`}>
+            {(f.filename.split(".").pop() ?? "file").slice(0, 4)}
+          </span>
+          <span className="font-mono">{f.filename}</span>
+          {f.bytes != null && <span className="text-zinc-400">{size(f.bytes)}</span>}
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -197,12 +217,14 @@ function Detail({ d }: { d: SessionDetail }) {
             <div key={m.id} className="rounded-lg bg-zinc-50 p-3 text-sm">
               <div className="mb-1 text-xs text-zinc-400">{m.sender}</div>
               <div className="whitespace-pre-wrap">{m.body}</div>
+              <Files files={m.files} />
             </div>
           ))}
           {d.reply && (
             <div className="ml-8 rounded-lg bg-emerald-50 p-3 text-sm">
-              <div className="mb-1 text-xs text-emerald-700">Our reply</div>
+              <div className="mb-1 text-xs text-emerald-700">Our reply{d.reply_files?.length ? " · with attachment" : ""}</div>
               <div className="whitespace-pre-wrap">{d.reply}</div>
+              <Files files={d.reply_files} ours />
             </div>
           )}
         </div>
