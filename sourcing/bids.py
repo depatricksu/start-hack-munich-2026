@@ -106,7 +106,8 @@ def request(session, fields):
                             "Pickup %s to %s airport, %g kg" % (ctx["postcode"], o, fields["weight_kg_total"]), TRUCK_MAILS, ctx)
 
     subject = "Rate request %s-%s, %g kg" % (o, d, fields["weight_kg_total"])
-    airlines = serving("airline", d)
+    banned = _banned(tid)
+    airlines = [c for c in serving("airline", d) if c["name"].lower() not in banned]   # do not even ask an excluded airline
     from sourcing import portal
     portal_down = getattr(portal, "LAST_DOWN", False)     # 5U turned the portal rate API off (503): its airlines are missing from options
     if not options or portal_down:                    # no price, OR the portal is down: ask the airlines and the rate desk, and wait
@@ -305,6 +306,16 @@ def pick_bid(bids_, prefer):
     return min(bids_, key=lambda b: (float(price(b) / pmin) + max(hours(b), 1.0) / tmin) / 2), "balanced"
 
 
+def _banned(thread_id):
+    """Lower-case names of the airlines this customer told us never to offer (core/main.py excluded_airlines)."""
+    try:
+        from core import main
+        return {n.lower() for n in main.excluded_airlines(thread_id)}
+    except Exception as e:                            # never let this stop a quote
+        db.event("excluded_airlines_error", thread_id, error=str(e))
+        return set()
+
+
 def final_options(thread_id, options):
     """Sheet/portal options + airline bids, each with the trucker leg added when it is a door pickup."""
     bs = rows(thread_id)
@@ -314,6 +325,8 @@ def final_options(thread_id, options):
     fields = json.loads(s["fields"])
     prefer = fields.get("prefer")
     air = [b for b in _usable(thread_id, "airline") if b["required"]]
+    banned = _banned(thread_id)                       # "please do not offer Zephyr (ZS)": never pick that bid, so the
+    air = [b for b in air if (b["carrier"] or "").lower() not in banned]   # next best one is quoted, not nothing
     if options and air:                               # portal down (503): sheets AND mailed airline bids compete
         for b in air:                                 # a mailed price competes even when the same airline has a portal/
             # sheet price: since 5U's 19:15 change the bid is often CHEAPER (round 33: winners booked Borealis, a portal
