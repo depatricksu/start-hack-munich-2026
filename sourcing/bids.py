@@ -306,10 +306,9 @@ def final_options(thread_id, options):
     prefer = fields.get("prefer")
     air = [b for b in _usable(thread_id, "airline") if b["required"]]
     if options and air:                               # portal down (503): sheets AND mailed airline bids compete
-        have = {x["airline"] for x in options}
-        for b in air:
-            if b["carrier"] in have:
-                continue
+        for b in air:                                 # a mailed price competes even when the same airline has a portal/
+            # sheet price: since 5U's 19:15 change the bid is often CHEAPER (round 33: winners booked Borealis, a portal
+            # airline). The cheaper/faster of the two wins in finalize; Patrick's outlier check drops a misread bid.
             days = b["transit_days"] if b["transit_days"] is not None else 99   # unknown speed never wins "fastest"
             options = options + [{"airline": b["carrier"], "origin": fields.get("origin"),
                                   "destination": fields.get("destination"), "transit_days": int(-(-float(days) // 1)),
