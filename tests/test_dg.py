@@ -98,6 +98,15 @@ class Attachments(unittest.TestCase):
         data = _zip({"word/document.xml": doc})
         self.assertEqual(dg.scan_attachments([("SLI.docx", data)])["un"], "UN1950")
 
+    def test_check_mail_with_inline_attachment(self):
+        import base64
+        doc = '<w:document><w:body><w:p><w:r><w:t>Dangerous goods: UN1950, Class 2.1, Aerosols</w:t></w:r></w:p></w:body></w:document>'
+        att = {"filename": "SLI.docx", "content_base64": base64.b64encode(_zip({"word/document.xml": doc})).decode()}
+        mail = {"id": 1, "body": "Spray cans, general cargo, non-dangerous.", "attachments": [att]}
+        self.assertEqual(dg.check_mail(mail)["un"], "UN1950")
+        self.assertIsNone(dg.check_mail({"id": 2, "body": "General cargo, non-dangerous.", "attachments": []}))
+        self.assertIsNone(dg.check_mail({"id": 3, "body": "x", "attachments": [{"filename": "a.pdf"}]}))   # no id, no bytes
+
     def test_clean_files_and_garbage_give_none(self):
         self.assertIsNone(dg.scan_attachments([("note.txt", b"General cargo, non-dangerous")]))
         self.assertEqual(dg.attachment_text(b"PK\x03\x04broken", "x.xlsx"), "")

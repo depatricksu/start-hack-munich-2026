@@ -88,6 +88,44 @@ def attachment_text(data, filename=""):
         return ""
 
 
+def download(mail_id, att, timeout=10):
+    """Raw bytes of one mailbox attachment (inline base64 or the mailbox API). None on any error."""
+    import base64, urllib.parse, urllib.request
+    try:
+        if att.get("content_base64"):
+            return base64.b64decode(att["content_base64"])
+        from core import config
+        att_id = att.get("id") or att.get("attachment_id")
+        if att_id is None or not config.API_KEY:
+            return None
+        url ="%s/v1/mailbox/messages/%s/attachments/%s" % (config.BASE_URL, mail_id, urllib.parse.quote(str(att_id)))
+        req = urllib.request.Request(url, headers={"X-API-Key": config.API_KEY})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read()
+    except Exception:
+        return None
+
+
+def check_mail(mail):
+    """The one call for an RFQ: DG declared in any attachment (or, with a UN number, in the mail itself)?
+    Returns {"un", "class", "name", "file"} or None. Never raises."""
+    try:
+        files = []
+        for att in mail.get("attachments") or []:
+            name = att.get("filename") or att.get("name") or "attachment"
+            data = download(mail["id"], att)
+            if data:
+                files.append((name, data))
+        found = scan_attachments(files)
+        if found:
+            return found
+        body = mail.get("body") or ""
+        info = read_declaration(body) if re.search(r"\bUN\s?-?\d{4}\b", body, re.I) else None
+        return dict(info, file="mail body") if info else None
+    except Exception:
+        return None
+
+
 def scan_attachments(files):
     """files: [(filename, bytes)]. Returns the first DG declaration found, with the file it came from, or None."""
     for name, data in files or []:
