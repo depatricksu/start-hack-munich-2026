@@ -54,6 +54,7 @@ def load_odds():
 
 
 def log(rec):
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
     rec["at"] = time.strftime("%H:%M:%S")
     open(OUT, "a").write(json.dumps(rec, default=str) + "\n")
     print(json.dumps(rec, default=str), flush=True)
@@ -79,6 +80,7 @@ def step(state):
                 ex = A.explain(quote, c["accuracy"], s)
                 state["odds"] = A.update_odds(state["odds"], ex["rule_errors"])
                 rec.update(thread=s["thread_id"], quote=quote, verdict=A.verdict(ex["rule_errors"], c["accuracy"]), odds=state["odds"], **ex)
+                os.makedirs(os.path.dirname(ODDS), exist_ok=True)
                 json.dump(state["odds"], open(ODDS, "w"))
         log(rec)
     state["total"], state["ts"] = total, time.time()
