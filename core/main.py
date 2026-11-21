@@ -16,7 +16,7 @@ from pricing import price as sheets
 from sourcing import portal
 from actions import queue as actions            # take-over queue: sends human replies typed in the UI
 from shared.rfq import gate as rfq_gate
-from pricing import multi
+from pricing import multi, tariff_mail
 
 try:                       # sourcing/bids.py does not exist yet. See CLAUDE.md "How to plug in".
     from sourcing import bids
@@ -134,6 +134,7 @@ HANDLERS = {
     "follow_up": booking.handle_follow_up,
     "booking_confirmation": booking.handle_booking_confirmation,
     "tracking": tracking.handle,                         # task 05 (Patrick): answer from our bookings table
+    "tariff": tariff_mail.handle,                        # Patrick: airline tariff mail -> live price update
 }
 
 

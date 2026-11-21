@@ -11,8 +11,45 @@ import json, os
 from decimal import Decimal, ROUND_HALF_UP
 
 _PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tariffs.json")
-_TARIFFS = json.load(open(_PATH))
+# Airlines mail new tariffs during the night: pricing/tariff_mail.py stores them here (git-ignored) and
+# swaps them in live. One entry per airline replaces ALL of that airline's start-kit lanes.
+OVERRIDES = os.environ.get("TARIFF_OVERRIDES", os.path.join(os.path.dirname(_PATH), "..", "data", "tariff_overrides.json"))
 VOL_FACTOR = Decimal("167")
+
+
+def _overrides():
+    if not os.path.exists(OVERRIDES):
+        return {}
+    with open(OVERRIDES) as f:
+        return json.load(f)
+
+
+def _load():
+    with open(_PATH) as f:
+        base = json.load(f)
+    over = _overrides()
+    keep = [r for r in base if r["airline"].lower() not in {a.lower() for a in over}]
+    return keep + [r for recs in over.values() for r in recs]
+
+
+_TARIFFS = _load()
+
+
+def replace_airline(airline, records):
+    """Swap one airline's lanes now (no restart) and persist the override."""
+    over = _overrides()
+    over = {a: v for a, v in over.items() if a.lower() != airline.lower()}
+    over[airline] = records
+    os.makedirs(os.path.dirname(OVERRIDES), exist_ok=True)
+    tmp = OVERRIDES + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(over, f, indent=1)
+    os.replace(tmp, OVERRIDES)
+    _TARIFFS[:] = _load()                    # in place: every importer sees the new prices
+
+
+def lanes_of(airline):
+    return [r for r in _TARIFFS if r["airline"].lower() == airline.lower()]
 
 
 def _d(x):

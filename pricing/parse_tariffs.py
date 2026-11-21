@@ -9,8 +9,8 @@ Price rule (identical in every sheet header):
   total      = freight + (fuel + security) * chargeable
 The minimum applies to the freight before surcharges. Run: python pricing/parse_tariffs.py
 """
-import glob, json, os, re, subprocess, sys
-import openpyxl, docx
+import glob, json, os, re, shutil, subprocess, sys
+# openpyxl / docx / pdftotext are imported where used: a missing one must not crash the runner.
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 KIT = os.path.join(HERE, "..", "kit", "start-kit")
@@ -76,15 +76,25 @@ def breaks_from(cells):
     return [0] + nums[1:] if toks[0][2].startswith("-") else nums
 
 
+def _pdf_text(path):
+    """pdftotext (poppler) if installed, else pypdf in layout mode."""
+    if shutil.which("pdftotext"):
+        return subprocess.check_output(["pdftotext", "-layout", path, "-"]).decode()
+    import pypdf
+    return "\n".join(pg.extract_text(extraction_mode="layout") for pg in pypdf.PdfReader(path).pages)
+
+
 def load_rows(path):
     """Return list of rows (each a list of cell strings or floats) for any format."""
     ext = path.rsplit(".", 1)[1].lower()
     rows = []
     if ext == "xlsx":
+        import openpyxl
         for ws in openpyxl.load_workbook(path, data_only=True):
             for r in ws.iter_rows(values_only=True):
                 rows.append(["" if c is None else (c if isinstance(c, (int, float)) else str(c).strip()) for c in r])
     elif ext == "docx":
+        import docx
         d = docx.Document(path)
         for p in d.paragraphs:
             if p.text.strip():
@@ -93,7 +103,7 @@ def load_rows(path):
             for tr in t.rows:
                 rows.append([c.text.strip() for c in tr.cells])
     elif ext == "pdf":
-        txt = subprocess.check_output(["pdftotext", "-layout", path, "-"]).decode()
+        txt = _pdf_text(path)
         for ln in txt.splitlines():
             if ln.strip():
                 rows.append([c.strip() for c in re.split(r"\s{2,}", ln.strip())])
