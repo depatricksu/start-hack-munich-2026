@@ -8,8 +8,8 @@ and compares them with what the gateway call took from the mail.
     diff  = dg.compare(fields, mail)              # what disagrees by more than 2 %, or {}
 
 dg.check_mail() already downloads the attachments; it keeps their text in a small cache, so compare() costs nothing.
-ATTACH_OVERRIDE=1 (env, default 0) lets the attachment's gross weight / volume win in core (see core/main.py hook);
-default is: log the difference only.
+The attachment's gross weight / volume win in core (see core/main.py hook) since 5U round 57; ATTACH_OVERRIDE=0
+turns that off (log the difference only). dg.note() tells the customer which number we priced on.
 """
 import os, re
 
@@ -18,7 +18,13 @@ _TEXT = {}  # mail id -> attachment text (filled by attach.check_mail), at most 
 KG = r"(\d{1,3}(?:[.,\s]\d{3})*(?:[.,]\d+)?|\d+(?:[.,]\d+)?)\s*(?:kg|kgs|kilos?)\b"
 GROSS = re.compile(r"(?:total\s+)?(?:gross\s*(?:weight)?|g\.?\s?w\.?|brutto(?:gewicht)?|chargeable\s+weight|total\s+weight|"
                    r"poids\s+brut|peso\s+(?:bruto|lordo))\s*[:=]?\s*" + KG, re.I)
-PIECES = re.compile(r"(?:total\s+)?(?:pieces|pcs|packages|colli|cartons|pallets|packstücke|anzahl)\s*[:=]?\s*(\d{1,4})\b", re.I)
+# Unit in brackets before the value, no unit after it (5U round 57: "Total gross weight (kg): 1729").
+GROSS_UNIT_FIRST = re.compile(r"(?:gross\s*(?:weight)?|g\.?\s?w\.?|brutto(?:gewicht)?|total\s+weight|poids\s+brut|"
+                              r"peso\s+(?:bruto|lordo))[ \t]*\((?:kg|kgs)\)[ \t]*[:=]?[ \t]*\|?[ \t]*"   # xlsx cells come as "label: | value"
+                              r"(\d{1,3}(?:[.,\s]\d{3})*(?:[.,]\d+)?|\d+(?:[.,]\d+)?)\b", re.I)
+VOLUME_UNIT_FIRST = re.compile(r"(?:volume|vol\.?|volumen)[ \t]*\((?:cbm|m3|m³)\)[ \t]*[:=]?[ \t]*\|?[ \t]*(\d+(?:[.,]\d+)?)\b", re.I)
+# The number must be on the label's own line: a table header "Pieces" above a row "1729 80 140" is not 1729 pieces.
+PIECES = re.compile(r"(?:total[ \t]+)?(?:pieces|pcs|packages|colli|cartons|pallets|packstücke|anzahl)[ \t]*[:=]?[ \t]*\|?[ \t]*(\d{1,4})\b", re.I)
 VOLUME = re.compile(r"(?:total\s+)?(?:volume|vol\.?|cbm|m3|m³)\s*[:=]?\s*(\d+(?:[.,]\d+)?)\s*(?:cbm|m3|m³)?", re.I)
 DIMS = re.compile(r"(\d{1,3}(?:[.,]\d+)?)\s*[x×*]\s*(\d{1,3}(?:[.,]\d+)?)\s*[x×*]\s*(\d{1,3}(?:[.,]\d+)?)\s*cm"
                   r"(?:[^\n\d]{0,20}(\d{1,3})\s*(?:pcs|pieces|x|colli|cartons|pallets)?)?", re.I)
@@ -40,13 +46,14 @@ def packing_facts(text):
     if not text:
         return {}
     out = {}
-    weights = [_num(m.group(1)) for m in GROSS.finditer(text)]
+    weights = [_num(m.group(1)) for m in GROSS.finditer(text)] + [_num(m.group(1)) for m in GROSS_UNIT_FIRST.finditer(text)]
     if weights:
         out["gross_kg"] = max(weights)
     pieces = [int(m.group(1)) for m in PIECES.finditer(text)]
     if pieces:
         out["pieces"] = max(pieces)
-    vols = [_num(m.group(1)) for m in VOLUME.finditer(text) if _num(m.group(1)) < 500]
+    vols = [_num(m.group(1)) for m in list(VOLUME.finditer(text)) + list(VOLUME_UNIT_FIRST.finditer(text))
+            if _num(m.group(1)) < 500]
     if vols:
         out["volume_cbm"] = max(vols)
     elif DIMS.search(text):
@@ -81,4 +88,46 @@ def compare(fields, mail, tolerance=0.02):
 
 
 def override():
-    return os.environ.get("ATTACH_OVERRIDE", "0") == "1"
+    """The packing list beats the mail text. Default ON since 5U round 57 (21 Nov 21:40): the mail said 1210 kg, the
+    attached packing list 1729 kg, we priced 1210 and were rejected too_low. ATTACH_OVERRIDE=0 turns it off."""
+    return os.environ.get("ATTACH_OVERRIDE", "1") == "1"
+
+
+def winner(d):
+    """Which number to price on: the attachment's, unless it is so far from the mail that we probably misread it."""
+    try:
+        a, m = float(d["attachment"]), float(d["mail"])
+        return a if m > 0 and 0.5 <= a / m <= 3 else m
+    except Exception:
+        return d.get("mail")
+
+
+NOTE = {
+    "en": "One note: your packing list shows {att} {unit} gross, while your mail says {mail} {unit}. I have priced on the packing list.",
+    "de": "Ein Hinweis: Ihre Packliste nennt {att} {unit} brutto, in Ihrer Mail stehen {mail} {unit}. Ich habe mit der Packliste gerechnet.",
+    "it": "Una nota: la packing list indica {att} {unit} lordi, mentre nella mail sono {mail} {unit}. Ho calcolato sulla packing list.",
+    "fr": "Une remarque : votre liste de colisage indique {att} {unit} brut, alors que votre mail mentionne {mail} {unit}. J'ai calculé sur la liste de colisage.",
+    "es": "Una nota: su packing list indica {att} {unit} brutos, mientras que su correo dice {mail} {unit}. He calculado con la packing list.",
+}
+NOTE_VOL = {
+    "en": "One note: your packing list shows {att} cbm, while your mail says {mail} cbm. I have priced on the packing list.",
+    "de": "Ein Hinweis: Ihre Packliste nennt {att} cbm, in Ihrer Mail stehen {mail} cbm. Ich habe mit der Packliste gerechnet.",
+    "it": "Una nota: la packing list indica {att} cbm, mentre nella mail sono {mail} cbm. Ho calcolato sulla packing list.",
+    "fr": "Une remarque : votre liste de colisage indique {att} cbm, alors que votre mail mentionne {mail} cbm. J'ai calculé sur la liste de colisage.",
+    "es": "Una nota: su packing list indica {att} cbm, mientras que su correo dice {mail} cbm. He calculado con la packing list.",
+}
+
+
+def note(fields, body):
+    """Tell the customer which number we priced on when the packing list replaced the mail's weight or volume."""
+    used = fields.get("attachment_used") or {}
+    if not used:
+        return body
+    from .quote import _insert_before_signoff
+    lang = (fields.get("language") or "en")[:2].lower()
+    g = lambda x: ("%g" % float(x))                                # noqa: E731  1729.0 -> 1729
+    if "gross_kg" in used:
+        text = NOTE.get(lang, NOTE["en"]).format(att=g(used["gross_kg"]["attachment"]), mail=g(used["gross_kg"]["mail"]), unit="kg")
+    else:
+        text = NOTE_VOL.get(lang, NOTE_VOL["en"]).format(att=g(used["volume_cbm"]["attachment"]), mail=g(used["volume_cbm"]["mail"]))
+    return _insert_before_signoff(body, text)

@@ -163,7 +163,7 @@ class Facts(unittest.TestCase):
 
     def test_nothing_found(self):
         self.assertEqual(dg.packing_facts("Hello, general cargo"), {})
-        self.assertFalse(dg.override())
+        self.assertTrue(dg.override())               # on by default since 5U round 57 (see tests/test_packing_list_wins.py)
 
 
 if __name__ == "__main__":
