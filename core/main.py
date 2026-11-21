@@ -224,6 +224,59 @@ OUTLIER_LOW = Decimal(os.environ.get("PRICE_OUTLIER_LOW", "0.35"))
 OUTLIER_HIGH = Decimal(os.environ.get("PRICE_OUTLIER_HIGH", "4"))
 
 
+_NO = re.compile(r"\b(?:do not|don'?t|never|no longer|not|exclude\w*|avoid\w*|nicht|keine?n?|ohne|niemals)\b", re.I)
+_USE = re.compile(r"\b(?:offer\w*|use|using|book\w*|quot\w*|fly|flying|ship\w*|send|rout\w*|via|with|carrier|airline|"
+                  r"anbiet\w*|buch\w*|nehm\w*|flieg\w*|mit|exclude\w*|avoid\w*)\b", re.I)
+
+
+def _airline_names():
+    """name -> name for every airline we can quote (sheets, carrier list, portal), plus 2-letter codes."""
+    names = {r["airline"] for r in sheets._TARIFFS} | {c["name"] for c in bids.CARRIERS if c["kind"] == "airline"}
+    for airlines in getattr(portal, "LANES", {}).values():
+        names |= {a.get("name") if isinstance(a, dict) else a for a in airlines}
+    return {n for n in names if n}
+
+
+def excluded_airlines(tid):
+    """Airlines the customer told us never to offer: 'Please do not offer Zephyr Steppe Cargo (ZS) for this shipment
+    or for any of our future inquiries' (5U, 21 Nov 20:09). Read from ALL mails of this customer, earlier threads too,
+    so 'future inquiries' are honoured. A sentence counts when it has a no-word, a use-word and the airline's full name,
+    its first word or its code in brackets."""
+    s = db.session(tid) or {}
+    sender = (s.get("customer") or "").lower()
+    if not sender:
+        return set()
+    text = "\n".join("%s\n%s" % (r["subject"] or "", re.split(r"\n\s*(?:>|On .+wrote:|Am .+schrieb)", r["body"] or "")[0])
+                     for r in db.con().execute("SELECT subject, body FROM mails WHERE sender=?", (sender,)))
+    out = set()
+    for sentence in re.split(r"(?<=[.!?])\s+|\n", text):
+        if not (_NO.search(sentence) and _USE.search(sentence)):
+            continue
+        codes = set(re.findall(r"\(([A-Z0-9]{2})\)", sentence))
+        low = sentence.lower()
+        for name in _airline_names():
+            first = name.split()[0]
+            if name.lower() in low or (len(first) >= 5 and re.search(r"\b%s\b" % re.escape(first.lower()), low)):
+                out.add(name)
+        if codes:
+            for o in getattr(portal, "LANES", {}).values():
+                for a in o:
+                    if isinstance(a, dict) and a.get("code") in codes and a.get("name"):
+                        out.add(a["name"])
+    return out
+
+
+def drop_excluded(tid, options):
+    """Never quote an airline the customer excluded. None left -> [] (finalize hands it to a human)."""
+    banned = {n.lower() for n in excluded_airlines(tid)}
+    if not banned:
+        return options
+    keep = [x for x in options if str(x.get("airline") or "").lower() not in banned]
+    db.event("airline_excluded", tid, excluded=sorted(banned), dropped=[x.get("airline") for x in options if x not in keep],
+             kept=len(keep))
+    return keep
+
+
 def drop_price_outliers(tid, options):
     """Options of ONE request, same shipment (the trucker leg is in all of them): drop the absurd ones before we pick.
     Needs >= 3 priced options, never drops below 2, never stops a quote. Logged as price_outlier_dropped."""
@@ -264,6 +317,9 @@ def finalize(tid):
     options = bids.final_options(tid, options)               # add bids, add trucker leg
     if not options:
         return needs_human(tid, None, "no price found for this lane")
+    options = drop_excluded(tid, options)                    # "please do not offer Zephyr (ZS)": never quote it
+    if not options:
+        return needs_human(tid, None, "customer excluded every airline we have a price from")
     options = drop_price_outliers(tid, options)              # a misread bid (per-kg as total, x1000) never wins
     options, too_late = by_deadline(tid, options, fields)    # "must arrive by <date>": drop flights that land late
     if fields.get("prefer") == "fastest" or too_late:

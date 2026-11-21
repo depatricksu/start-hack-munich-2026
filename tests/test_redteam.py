@@ -131,5 +131,41 @@ class TestPriceOutliers(unittest.TestCase):
         self.assertEqual(main.drop_price_outliers(1, o), o)
 
 
+class TestExcludedAirlines(unittest.TestCase):
+    """5U trap 21 Nov 20:09 (request 10823): 'Please do not offer Zephyr Steppe Cargo (ZS) for this shipment or for
+    any of our future inquiries.'"""
+    ULN = ("Could you please quote your cheapest air freight option to ULN (Ulaanbaatar, MN), including truck collection "
+           "from our site in 65797 (Wiesbaden)?\n\nPlease do not offer Zephyr Steppe Cargo (ZS) for this shipment or for "
+           "any of our future inquiries.\n\nBest regards\nPetra Meyer")
+
+    def mail(self, mid, sender, body):
+        from core import db, mailbox
+        m = mailbox.normalize({"id": mid, "from": sender, "subject": "Air freight quote", "body": body})
+        db.save_mail(m)
+        db.new_session(m)
+        return mid
+
+    def opts(self):
+        return [{"airline": a, "total_eur": t} for a, t in (("Zephyr Steppe Cargo", "2100"), ("Himalaya Bridge Air", "2300"),
+                                                            ("Pampero Air Cargo", "2450"))]
+
+    def test_excluded_airline_is_never_quoted(self):
+        tid = self.mail(9810001, "petra@meyer-industrie.mail", self.ULN)
+        kept = main.drop_excluded(tid, self.opts())
+        self.assertNotIn("Zephyr Steppe Cargo", [x["airline"] for x in kept])
+        self.assertEqual(len(kept), 2)
+
+    def test_future_inquiry_of_the_same_customer(self):
+        self.mail(9810011, "anna@future-test.mail", self.ULN)
+        tid = self.mail(9810012, "anna@future-test.mail", "Cheapest to ULN please, 300 kg, 1.2 cbm, pickup 65797.")
+        self.assertIn("Zephyr Steppe Cargo", main.excluded_airlines(tid))
+
+    def test_other_customers_and_harmless_mentions_untouched(self):
+        tid = self.mail(9810021, "x@other.mail", "Cheapest to ULN please. Zephyr Steppe Cargo was fine last time, no preference.")
+        self.assertEqual(main.drop_excluded(tid, self.opts()), self.opts())
+        tid = self.mail(9810022, "y@other.mail", "Fastest to ULN, 300 kg. We don't need pickup.")
+        self.assertEqual(main.excluded_airlines(tid), set())
+
+
 if __name__ == "__main__":
     unittest.main()
