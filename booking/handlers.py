@@ -129,6 +129,13 @@ def _last_sentence(text):
     return parts[-1] if parts else ""
 
 
+EXTRA_SERVICE = re.compile(r"\b(insur\w*|versicher\w*|assicura\w*|assur\w*|seguro)\b[^.?!\n]{0,60}|"
+                           r"\b(?:cargo|goods|commercial|invoice) value\b[^.?!\n]{0,40}|\bwarenwert\b[^.?!\n]{0,40}", re.I)
+VALIDITY = re.compile(r"\b(how long (?:is|will) (?:the|this|your) (?:offer|quote|price|rate)|(?:offer|quote|price|rate) (?:is )?valid|"
+                      r"validity|valid (?:until|till|for how long)|wie lange (?:ist|gilt) (?:das|ihr) (?:angebot|preis)|"
+                      r"g[üu]ltig(?:keit)?|validit[àé])\b", re.I)
+
+
 def classify(body, subject=""):
     """accept / decline / better_price / faster / sending_docs / unclear. Only the customer's new text counts."""
     # "so we won\u2019t go ahead" (typographic apostrophe) was read as "go ahead" = yes and BOOKED (live, round 72)
@@ -141,8 +148,11 @@ def classify(body, subject=""):
         return "better_price"
     if SENDING_DOCS.search(text):              # "Passt, das Sicherheitsdatenblatt schicken wir nach": a yes, papers follow (#58)
         return "sending_docs"
-    if ACCEPT.search(text) and not QUESTION.search(text) and not CONDITION.search(text) and not NEW_FACTS.search(text):
+    facts = EXTRA_SERVICE.sub(" ", text)       # "book it, and insure it for EUR 25,000": the amount is a service wish
+    if ACCEPT.search(text) and not QUESTION.search(text) and not CONDITION.search(text) and not NEW_FACTS.search(facts):
         return "accept"
+    if VALIDITY.search(text) and not ACCEPT.search(text):
+        return "validity"
     if SHORT_YES.match(_answer_lines(text)):  # a bare "ok" / "Yes" / "De acuerdo" to OUR quote is a yes (#53)
         return "accept"
     last = _last_sentence(text)                # the answer is the last sentence; a "but" in an old story does not count (#54)
@@ -331,13 +341,26 @@ def chosen_from_reply(s):
 
 
 UNCLEAR_NOTE = "customer answered the quote, not a clear yes or no"
+VALIDITY_ANSWER = {
+    "en": "Hi,\n\ngood question. The price is valid for a booking today; airline rates can change from one day to the next. "
+          "Just reply 'book it' when you have your approval: if the airline still holds the rate, I confirm it at this price, "
+          "and if it has moved, I come back to you before anything is booked.\n\nBest regards\n%s\nAir Export",
+    "de": "Hallo,\n\ngute Frage. Der Preis gilt für eine Buchung heute; die Raten der Airlines können sich von Tag zu Tag ändern. "
+          "Antworten Sie einfach mit 'buchen', sobald Sie die Freigabe haben: Hält die Airline den Preis noch, bestätige ich "
+          "ihn so, und hat er sich geändert, melde ich mich vor der Buchung bei Ihnen.\n\nViele Grüße\n%s\nLuftfracht Export",
+}
+
+
+def SIGNER_NAME():
+    from llm.extract import SIGNER
+    return SIGNER
 AFTER_BOOKING = ("booking", "booked", "booking_requested", "confirmed")
 _THANKS_ONLY = re.compile(r"^\W*(?:(?:many |thank you|thanks|danke|vielen dank|merci|grazie|gracias|perfect|great|super|"
                           r"ok|noted|received|erhalten|top|wonderful|excellent)[\w\s,.!']{0,60})$", re.I)
 POST_BOOKING = [   # (kind, rule): what a customer writes after the booking that a forwarder must act on
     ("cancellation", re.compile(r"\b(cancel\w*|storn\w*|annul\w*|call (?:it )?off|no longer needed|nicht mehr ben[öo]tigt)\b", re.I)),
     ("complaint", re.compile(r"\b(did ?n[o']t (?:show|arrive|come|turn up)|not (?:shown|arrived|picked up)|no(?:body| one) came|"
-                             r"where is (?:the|our|my)|still waiting|damaged|broken|missing|complain\w*|unacceptable|"
+                             r"still waiting|damaged|broken|missing|complain\w*|unacceptable|"
                              r"nicht (?:gekommen|abgeholt|erschienen)|beschädigt|reklamation|beschwerde)\b", re.I)),
     ("change", re.compile(r"\b(change|changed|instead|new (?:date|address|pickup|weight)|postpone\w*|delay\w*|moved?|"
                           r"only (?:be )?ready on|not ready|verschieb\w*|änder\w*|neue[rs]? (?:termin|datum|adresse)|"
@@ -351,6 +374,11 @@ ACK_AFTER = {
 }
 
 
+STATUS_Q = re.compile(r"\b(where is (?:the|our|my) (?:shipment|cargo|goods|consignment|freight)|any (?:news|update)|status|"
+                      r"has it (?:left|departed|arrived|landed)|when (?:will|does) it (?:leave|depart|arrive|land)|eta\b|tracking|"
+                      r"wo ist (?:die|unsere|meine) (?:sendung|ware)|stand der sendung|schon (?:abgeflogen|angekommen))", re.I)
+
+
 def after_booking(s, mail):
     """A customer mail after the booking: a 'thank you' needs nothing; an auto-reply is ignored; a cancellation, a new
     date / address / weight or a complaint goes to a human at once (red, with the reason) and the customer gets a short
@@ -360,6 +388,13 @@ def after_booking(s, mail):
     if AUTO_REPLY.search(text):
         return db.event("after_booking_auto_reply", tid, mail["id"])
     kind = next((k for k, rx in POST_BOOKING if rx.search(text)), None)
+    if not kind and STATUS_Q.search(text):                       # "where is my shipment?": answer from the booking, like tracking
+        from booking import tracking
+        b = crm.get(tid)
+        if b:
+            lang = "de" if (b.get("language") or "").lower().startswith("de") else "en"
+            _reply_session(s, mail, tracking.answer_text(b, tid, lang), "status_answer")
+            return db.event("after_booking_status_answered", tid, mail["id"])
     if not kind:
         return db.event("follow_up_ignored", tid, mail["id"], status=s["status"],
                         why="thanks" if _THANKS_ONLY.match(_answer_lines(text)) else "nothing to act on")
@@ -515,6 +550,15 @@ def handle_follow_up(mail):
     db.event("follow_up", tid, mail["id"], verdict=verdict, status=s["status"])
     if verdict == "auto_reply":                                  # out-of-office robot: no alarm, the quote stays open
         return None
+    if verdict == "validity":                                    # "how long is the offer valid?": answer, keep the quote open
+        view, lang = _session_view(s)
+        body = VALIDITY_ANSWER["de" if lang == "de" else "en"] % SIGNER_NAME()
+        _reply_session(s, mail, body, "validity_answer")
+        return db.event("validity_answered", tid, mail["id"])
+    if verdict == "accept" and EXTRA_SERVICE.search(own_text(mail["body"], mail.get("subject"))):
+        wish = EXTRA_SERVICE.search(own_text(mail["body"], mail.get("subject"))).group(0)
+        db.event("extra_service_requested", tid, mail["id"], wish=wish[:120])
+        db.update_session(tid, note="CUSTOMER ALSO ASKED: %s (book it, then arrange this by hand)" % wish[:160])
     if s["status"] == "meeting_proposed" and verdict != "decline":   # "Tue 10:00, please confirm" is not a booking
         return _needs_human(tid, mail["id"], "customer answered our call offer (picked a time?): forwarder to follow up")
     if verdict == "decline":

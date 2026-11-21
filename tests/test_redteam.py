@@ -306,5 +306,37 @@ class TestRound5Batch1(unittest.TestCase):
         self.assertEqual([x["airline"] for x in main.keep_required(tid, opts)], ["Meridian Freightways"])
 
 
+class TestRound6Batch2(TestRound5Batch1):
+    """Red-team round 6: status question after booking, offer validity, accept + insurance, special cargo warnings."""
+    def test_cancel_change_complaint_reach_a_human(self):      # inherited helpers only
+        pass
+
+    def test_thank_you_after_booking_is_quiet(self):
+        pass
+
+    def test_status_question_gets_an_answer_not_an_alarm(self):
+        from core import db
+        tid = 9850000
+        self._booked(tid)
+        self._reply(tid, 1, "Hi Lena, where is my shipment now? Has it left Frankfurt yet?")
+        self.assertEqual(db.session(tid)["status"], "booked")
+        kinds = [r["kind"] for r in db.con().execute("SELECT kind FROM events WHERE thread_id=?", (tid,))]
+        self.assertIn("after_booking_status_answered", kinds)
+
+    def test_validity_and_insurance(self):
+        from booking.handlers import classify
+        self.assertEqual(classify("How long is this offer valid? We need internal approval until Tuesday."), "validity")
+        self.assertEqual(classify("Please book it, and please make sure the goods are insured for EUR 25,000."), "accept")
+        self.assertEqual(classify("Please book it, but for 750 kg instead."), "unclear")          # a real new fact still stops
+
+    def test_special_cargo_warnings(self):
+        from shared.rfq import special_cargo
+        self.assertTrue(special_cargo({"pieces": [{"count": 1, "l_cm": 420, "w_cm": 230, "h_cm": 210, "kg_each": 3200}]}, ""))
+        self.assertTrue(special_cargo({}, "2 pallets of frozen food samples at -18 °C"))
+        self.assertTrue(special_cargo({}, "Please quote DAP, door delivery to our customer's warehouse"))
+        self.assertEqual(special_cargo({"pieces": [{"count": 6, "l_cm": 120, "w_cm": 80, "h_cm": 110, "kg_each": 180}]},
+                                       "6 pallets of machine parts"), [])
+
+
 if __name__ == "__main__":
     unittest.main()

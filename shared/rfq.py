@@ -413,6 +413,31 @@ def _declared_dg(mail: dict):
     return None if _DG_DENIAL.search(text) else True
 
 
+_TEMP = re.compile(r"(?:-|\u2212|minus ?|\+)?\d{1,2} ?°C|\b(?:frozen|chilled|refrigerated|reefer|temperature[- ]controlled|cold chain|"
+                   r"perishables?|tiefgek[üu]hlt|gek[üu]hlt|k[üu]hlkette|2-8 ?°?C)\b", re.I)
+_DOOR_DELIVERY = re.compile(r"\b(?:DAP|DDP|DPU|door[- ]to[- ]door|door delivery|deliver(?:y|ed)? to (?:our|the|their) (?:customer|consignee|"
+                            r"warehouse|site|factory)|zustellung beim empf[äa]nger|frei haus)\b", re.I)
+
+
+def special_cargo(fields: dict, text: str) -> list[str]:
+    """Warnings only (the quote still goes out): what a forwarder checks before promising an aircraft.
+    Single piece beyond a wide-body lower-deck pallet (> 318 cm long, > 163 cm high) or > 3,000 kg -> freighter / main deck;
+    temperature control; door delivery at destination (we price to the destination airport)."""
+    out = []
+    for p in fields.get("pieces") or []:
+        l, w, h, kg = (float(p.get(k) or 0) for k in ("l_cm", "w_cm", "h_cm", "kg_each"))
+        if max(l, w) > 318 or h > 163 or kg > 3000:          # beyond a lower-deck pallet (318 x 244 x 163 cm) or 3 t a piece
+            out.append("special_cargo: piece %gx%gx%g cm / %g kg needs a freighter (main deck): check the airline" % (l, w, h, kg))
+            break
+    m = _TEMP.search(text or "")
+    if m:
+        out.append("special_cargo: temperature control ('%s'): check cold-chain handling with the airline" % m.group(0))
+    m = _DOOR_DELIVERY.search(text or "")
+    if m:
+        out.append("door_delivery: customer asked '%s', we price to the destination airport only" % m.group(0))
+    return out
+
+
 def gate(fields: dict, mail: dict) -> tuple[bool, str]:
     """(ok, note). ok=False -> needs_human with `note`. ok=True -> price it; note lists warnings (may be "").
 
@@ -446,6 +471,7 @@ def gate(fields: dict, mail: dict) -> tuple[bool, str]:
             stop.append(f"{i.field}: {i.message}")
         else:
             warn.append(f"{i.field}: {i.message}")
+    warn += special_cargo(fields, (mail.get("subject") or "") + "\n" + (mail.get("body") or ""))
     stop += _weight_traps(r, (mail.get("subject") or "") + "\n" + (mail.get("body") or ""))
     warn += _cross_check(r, extract_rfq(mail.get("subject") or "", mail.get("body") or ""))
     return (not stop), " | ".join(stop + warn)
