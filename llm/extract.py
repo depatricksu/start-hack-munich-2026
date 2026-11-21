@@ -6,6 +6,7 @@ The model never does math and never invents a price. It returns:
 """
 import json, os, re, zlib
 from core import config, mailbox
+from . import lang as langmod, quality
 
 SIGNER = os.environ.get("SIGNER", "Lena Hofmann")   # the person who signs our mails (jury: most human email)
 
@@ -43,7 +44,8 @@ Never use: "I hope this email finds you well", "Thank you for reaching out", "Ce
 State one all-in price using exactly the placeholder {PRICE}. Mention {AIRLINE} and {TRANSIT_DAYS} days transit.
 End with one easy next step: they can simply reply to book it.
 If there are several shipments, do NOT use {PRICE}, {AIRLINE} or {TRANSIT_DAYS}: put {PRICE_TABLE} on its own line where the per-shipment prices go and state the all-in total with {TOTAL}.
-Never write a number for the price yourself. Do NOT write any closing or signature (no "Best regards", no name): our system adds it. Never use the customer's name or signature as ours."""
+Never write a number for the price yourself. Do NOT write any closing or signature (no "Best regards", no name): our system adds it. Never use the customer's name or signature as ours.
+Only state facts that are in the customer's email or behind our placeholders. Never mention deadlines, cut-off or drop-off times, customs, insurance, packaging, documents or dates of your own, and write no number the customer did not write."""
 
 # USD per 1M tokens (input, output). Only used for our own log; 5U measures the real cost.
 PRICES = {"gpt-4o-mini": (0.15, 0.60)}
@@ -96,28 +98,60 @@ HUMAN = {
         "rund {TRANSIT_DAYS} Tage Laufzeit.\n\nSoll ich das so buchen? Eine kurze Antwort genügt.\n\n"
         "Beste Grüße\n{SIGNER}\nLuftfracht Export",
     ],
+    "it": [
+        "{HELLO}\n\ngrazie per la richiesta {ROUTE}. Per i vostri {WEIGHT} possiamo offrire {PRICE} tutto incluso con {AIRLINE}, "
+        "tempo di transito circa {TRANSIT_DAYS} giorni.\n\nSe va bene, basta una breve risposta e prenoto subito.\n\n"
+        "Cordiali saluti\n{SIGNER}\nAir Export",
+    ],
+    "fr": [
+        "{HELLO}\n\nmerci pour votre demande {ROUTE}. Pour vos {WEIGHT}, nous pouvons proposer {PRICE} tout compris avec {AIRLINE}, "
+        "transit d'environ {TRANSIT_DAYS} jours.\n\nSi cela vous convient, répondez simplement à ce mail et je réserve tout de suite.\n\n"
+        "Cordialement\n{SIGNER}\nAir Export",
+    ],
+    "es": [
+        "{HELLO}\n\ngracias por su solicitud {ROUTE}. Para sus {WEIGHT} podemos ofrecer {PRICE} todo incluido con {AIRLINE}, "
+        "tránsito de unos {TRANSIT_DAYS} días.\n\nSi le parece bien, responda a este correo y lo reservo enseguida.\n\n"
+        "Saludos cordiales\n{SIGNER}\nAir Export",
+    ],
 }
+ROUTE_FMT = {"en": "%s to %s", "de": "von %s nach %s", "it": "da %s a %s", "fr": "de %s à %s", "es": "de %s a %s"}
+NO_ROUTE = {"en": "for your shipment", "de": "für Ihre Sendung", "it": "per la vostra spedizione", "fr": "pour votre envoi",
+            "es": "para su envío"}
+NO_WEIGHT = {"en": "shipment", "de": "Sendung", "it": "colli", "fr": "colis", "es": "bultos"}
+HELLO = {"en": ("Hi %s,", "Hello,"), "de": ("Hallo %s,", "Guten Tag,"), "it": ("Buongiorno %s,", "Buongiorno,"),
+         "fr": ("Bonjour %s,", "Bonjour,"), "es": ("Hola %s,", "Buenos días,")}
+TEAM = {"de": "Luftfracht Export"}
+
+
+def reply_lang(fields):
+    """The language we answer in: the customer's, when we have our own texts for it, else English."""
+    l = (fields.get("language") or "").lower()[:2]
+    return l if l in HUMAN else "en"
 
 
 def _route(fields, lang):
     o, d = (fields.get("origin") or "").upper(), (fields.get("destination") or "").upper()
     names = dict(CITY, **CITY_DE) if lang == "de" else CITY
     if not (o and d):
-        return "your shipment" if lang != "de" else "Ihre Sendung"
-    return ("von %s nach %s" if lang == "de" else "%s to %s") % (names.get(o, o), names.get(d, d))
+        return "your shipment" if lang == "en" else "Ihre Sendung" if lang == "de" else NO_ROUTE[lang]
+    return ROUTE_FMT[lang] % (names.get(o, o), names.get(d, d))
 
 
 def _weight(fields, lang):
     w = fields.get("weight_kg_total") or fields.get("weight_kg")
     if not w:
-        return "shipment" if lang != "de" else "Sendung"
+        return NO_WEIGHT[lang]
     txt = ("{:,.0f}".format(float(w)) if float(w) == int(float(w)) else "{:,.1f}".format(float(w)))
-    return (txt.replace(",", "X").replace(".", ",").replace("X", ".") + " kg") if lang == "de" else (txt + " kg")
+    return (txt.replace(",", "X").replace(".", ",").replace("X", ".") + " kg") if lang != "en" else (txt + " kg")
 
 
-SIGN_OFF = {"en": ["Best regards", "Kind regards", "Best wishes"], "de": ["Viele Grüße", "Beste Grüße", "Freundliche Grüße"]}
+SIGN_OFF = {"en": ["Best regards", "Kind regards", "Best wishes"], "de": ["Viele Grüße", "Beste Grüße", "Freundliche Grüße"],
+            "it": ["Cordiali saluti", "Un cordiale saluto"], "fr": ["Cordialement", "Bien cordialement"],
+            "es": ["Saludos cordiales", "Un cordial saludo"]}
 _CLOSING = re.compile(r"^\s*(best|kind|warm)?\s*(regards|wishes)|^\s*(many\s+)?thanks|^\s*cheers|^\s*sincerely|^\s*yours|"
-                      r"^\s*(viele|beste|freundliche|herzliche|liebe)\s+grüße|^\s*mit\s+freundlichen|^\s*\{SIGNER\}", re.I)
+                      r"^\s*(viele|beste|freundliche|herzliche|liebe)\s+grüße|^\s*mit\s+freundlichen|^\s*\{SIGNER\}|"
+                      r"^\s*best\s*,?\s*$|^\s*(cordiali|distinti)\s+saluti|^\s*(bien\s+)?cordialement|^\s*saludos|^\s*atentamente|"
+                      r"^\s*(lg|vg|mfg|gruß|gruss|grüße|gruesse)\b", re.I)
 
 
 def _own_signature(body, lang, thread_id):
@@ -128,25 +162,23 @@ def _own_signature(body, lang, thread_id):
             lines = lines[:i]
             break
     sign = SIGN_OFF[lang][zlib.crc32(str(thread_id).encode()) % len(SIGN_OFF[lang])]
-    team = "Luftfracht Export" if lang == "de" else "Air Export"
+    team = TEAM.get(lang, "Air Export")
     return "\n".join(lines).rstrip() + "\n\n%s\n%s\n%s" % (sign, SIGNER, team)
 
 
-def fill_reply(template, best, fields, customer="", thread_id=0):
-    """Fill our placeholders. No usable model reply (or one with an unknown placeholder) -> a human fallback."""
-    lang = "de" if (fields.get("language") or "").lower() == "de" else "en"
+def _fill(template, best, fields, customer, thread_id, lang):
     if not template or "{PRICE}" not in template:
         variants = HUMAN[lang]
         template = variants[zlib.crc32(str(thread_id).encode()) % len(variants)]
     from booking.replies import first_name
     name = first_name(customer)
-    hello = ("Hallo %s," % name if lang == "de" else "Hi %s," % name) if name else ("Guten Tag," if lang == "de" else "Hello,")
+    hello = HELLO[lang][0] % name if name else HELLO[lang][1]
     vals = {"PRICE": "%s %s" % (best["total"], best["currency"]), "AIRLINE": best["airline"],
             "TRANSIT_DAYS": str(best["transit_days"]), "ROUTE": _route(fields, lang), "WEIGHT": _weight(fields, lang),
             "SIGNER": SIGNER, "HELLO": hello}
     body = re.sub(r"\{(PRICE|AIRLINE|TRANSIT_DAYS|ROUTE|WEIGHT|SIGNER|HELLO)\}", lambda m: vals[m.group(1)], template)
     if re.search(r"\{[A-Z_]+\}", body):                      # unknown placeholder from the model: use our own text
-        return fill_reply("", best, fields, customer, thread_id)
+        return _fill("", best, fields, customer, thread_id, lang)
     body = _add_expert_note(body, expert_note(best, fields, lang), vals["PRICE"])
     return _own_signature(body, lang, thread_id)
 
@@ -192,6 +224,24 @@ def _add_expert_note(body, note, price_text):
     return "\n\n".join(paras)
 
 
+def final_reply(template, best, fields, customer="", thread_id=0):
+    """-> (body, reasons). The filled reply after the quality gate (llm/quality.py).
+    reasons == [] : the text went out as written. Otherwise the model's text failed for these reasons and the body
+    is one of our own human templates instead (same price). No gateway call."""
+    lang = reply_lang(fields)
+    names = [n for n in re.split(r"[._\-+]", (customer or "").split("@")[0]) if len(n) > 3]
+    body = _fill(template, best, fields, customer, thread_id, lang)
+    reasons = quality.check(body, lang, best, fields, customer, SIGNER, names)
+    if reasons:
+        body = _fill("", best, fields, customer, thread_id, lang)
+    return body, reasons
+
+
+def fill_reply(template, best, fields, customer="", thread_id=0):
+    """Fill our placeholders. No usable model reply (or one that fails the quality gate) -> a human fallback."""
+    return final_reply(template, best, fields, customer, thread_id)[0]
+
+
 def safe_reply(text, lang="en", multi=False):
     """Return the model's reply if it only uses our placeholders and promises nothing; else a fixed template."""
     t = text or ""
@@ -199,7 +249,7 @@ def safe_reply(text, lang="en", multi=False):
         return t, True
     if multi:
         return "", False                                    # pricing/multi.py uses its own fallback
-    return HUMAN["de" if (lang or "").lower() == "de" else "en"][0], False   # human fallback, same price
+    return HUMAN[reply_lang({"language": lang})][0], False   # human fallback, same price
 
 
 def _fill_places(fields, mail):
@@ -214,6 +264,22 @@ def _fill_places(fields, mail):
             fields.setdefault("filled_by_code", []).append(k)
 
 
+def _text(mail):
+    return "%s\n%s" % (mail.get("subject") or "", mail.get("body") or "")
+
+
+def _annotate(fields, mail, detected):
+    """What the reply gate needs later: the customer's language (code wins when it is sure), numbers and sign-off."""
+    if detected:
+        if (fields.get("language") or "").lower()[:2] != detected:
+            fields["language_model"] = fields.get("language")     # kept for the log: what the model had said
+        fields["language"] = detected
+    fields["language_detected"] = detected
+    fields["customer_numbers"] = quality.numbers(_text(mail))[:80]
+    fields["customer_lines"] = quality.customer_lines(mail.get("body") or "")
+    return fields
+
+
 def _clip(body, head=3000, tail=3000):
     """Same token budget as before, but the end of a long mail (where the request often is) is kept too."""
     body = body or ""
@@ -222,19 +288,23 @@ def _clip(body, head=3000, tail=3000):
 
 def extract(mail):
     """Returns (fields dict, usage dict). Exactly one gateway call."""
+    detected = langmod.detect(_text(mail))                  # counted in code, no call
     if config.LLM_FAKE:
-        return _fake(mail), {"fake": True}
+        return _annotate(_fake(mail), mail, detected), {"fake": True}
+    hint = langmod.hint(detected)
+    user = "Subject: %s\n\n%s" % (mail["subject"], _clip(mail["body"]))
     status, data = mailbox.api("POST", "/v1/gateway/chat/completions", timeout=45, body={
         "model": config.LLM_MODEL,
         "max_completion_tokens": config.LLM_MAX_TOKENS,
         "response_format": {"type": "json_object"},
         "messages": [{"role": "system", "content": SYSTEM},
-                     {"role": "user", "content": "Subject: %s\n\n%s" % (mail["subject"], _clip(mail["body"]))}],
+                     {"role": "user", "content": user + ("\n\n[%s]" % hint if hint else "")}],
     })
     if status != 200:
         raise RuntimeError("gateway %s: %s" % (status, str(data)[:300]))
     fields = json.loads(data["choices"][0]["message"]["content"])
     _fill_places(fields, mail)
+    _annotate(fields, mail, detected)
     fields["reply"], fields["reply_ok"] = safe_reply(fields.get("reply"), fields.get("language"),
                                                      multi=len(fields.get("shipments") or []) > 1)
     u = data.get("usage") or {}

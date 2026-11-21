@@ -118,7 +118,9 @@ def finalize(tid):
     if not db.claim_for_sending(tid):                        # someone already quoted this thread
         return db.event("quote_skipped_already_sent", tid)
 
-    body = llm.fill_reply(s["reply_template"], best, fields, s["customer"], tid)   # llm/ (Patrick): never a raw placeholder
+    body, why = llm.final_reply(s["reply_template"], best, fields, s["customer"], tid)   # llm/: filled + quality gate
+    if why:                                                  # the model's text failed the gate: our own template went out
+        db.event("reply_gate", tid, reasons=why, language=fields.get("language"))
     subject = s["subject"] if s["subject"].lower().startswith("re:") else "Re: " + s["subject"]
     ok = mailbox.send(s["customer"], subject, body, in_reply_to=tid, thread_id=tid)
     now = time.time()
