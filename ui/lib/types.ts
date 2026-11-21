@@ -1,5 +1,8 @@
 // Shapes the UI uses. They mirror docs/ui-data.md (tables sessions, events, bids in data/forwarder.db).
-export type Status = "new" | "waiting_bids" | "sending" | "quoted" | "booked" | "needs_human" | "expired" | "failed";
+export type Status = "new" | "waiting_bids" | "sending" | "quoted" | "booking" | "booking_requested" | "booked" | "confirmed" | "lost" | "needs_human" | "expired" | "failed";
+
+// Statuses where our quote has already gone out.
+export const QUOTE_SENT: Status[] = ["quoted", "booking", "booking_requested", "booked", "confirmed", "lost"];
 
 export type Option = {
   airline: string;
@@ -42,7 +45,9 @@ export type Session = {
 export type EventRow = { id: number; ts: number; kind: string; data: Record<string, unknown> };
 export type MailRow = { id: number; sender: string; subject: string; body: string; received_at: number; route: string | null };
 
-export type SessionDetail = Session & { events: EventRow[]; mails: MailRow[] };
+export type ActionRow = { id: number; kind: string; body: string; created_at: number; done_at: number | null; result: string | null };
+
+export type SessionDetail = Session & { events: EventRow[]; mails: MailRow[]; actions: ActionRow[] };
 
 export type Stats = {
   total: number;

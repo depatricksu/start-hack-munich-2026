@@ -7,14 +7,18 @@ const CHIP: Record<Status, { label: string; cls: string }> = {
   waiting_bids: { label: "Waiting for bids", cls: "bg-amber-50 text-amber-800 ring-amber-200" },
   sending: { label: "Sending", cls: "bg-sky-50 text-sky-700 ring-sky-200" },
   quoted: { label: "Quoted", cls: "bg-emerald-50 text-emerald-700 ring-emerald-200" },
+  booking: { label: "Booking", cls: "bg-indigo-50 text-indigo-700 ring-indigo-200" },
+  booking_requested: { label: "Booking requested", cls: "bg-indigo-50 text-indigo-700 ring-indigo-200" },
   booked: { label: "Booked", cls: "bg-emerald-600 text-white ring-emerald-600" },
+  confirmed: { label: "Confirmed", cls: "bg-emerald-700 text-white ring-emerald-700" },
+  lost: { label: "Lost", cls: "bg-zinc-100 text-zinc-600 ring-zinc-300" },
   needs_human: { label: "Needs human", cls: "bg-red-50 text-red-700 ring-red-300" },
   expired: { label: "Expired", cls: "bg-zinc-100 text-zinc-500 ring-zinc-200" },
   failed: { label: "Failed", cls: "bg-red-600 text-white ring-red-600" },
 };
 
 export function StatusChip({ status }: { status: Status }) {
-  const c = CHIP[status] ?? CHIP.new;
+  const c = CHIP[status] ?? { label: String(status).replaceAll("_", " "), cls: "bg-zinc-100 text-zinc-600 ring-zinc-200" };
   return <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${c.cls}`}>{c.label}</span>;
 }
 

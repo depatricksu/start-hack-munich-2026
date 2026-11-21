@@ -27,7 +27,7 @@ function useJson<T>(url: string | null, every = 2000): T | null {
 
 function splitNote(note: string | null): { code: string | null; text: string } {
   if (!note) return { code: null, text: "" };
-  const m = /^([a-z_]+):\s*(.*)$/s.exec(note);
+  const m = /^([a-z_]+):\s*([\s\S]*)$/.exec(note);
   return m ? { code: m[1], text: m[2] } : { code: null, text: note };
 }
 
@@ -93,6 +93,48 @@ function Timeline({ events, t0 }: { events: EventRow[]; t0: number }) {
         </li>
       ))}
     </ol>
+  );
+}
+
+
+function TakeOver({ d, draft, setDraft }: { d: SessionDetail; draft: string; setDraft: (v: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const alreadyQuoted = d.quoted_at != null;
+  async function send() {
+    setBusy(true); setErr(null);
+    const r = await fetch(`/api/sessions/${d.thread_id}/send`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ body: draft }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) setErr(j.error ?? "Could not queue the reply."); else setDraft("");
+    setBusy(false);
+  }
+  return (
+    <section className="rounded-xl border-2 border-dashed border-zinc-300 bg-white p-5">
+      <h3 className="text-sm font-semibold">Take over</h3>
+      <p className="mb-2 text-xs text-zinc-500">
+        {alreadyQuoted ? "We already quoted. A new message goes out as a normal follow-up in the same thread."
+          : "Nothing has gone out yet. Your message becomes our one and only quote in this thread, so state one all-in price with its currency."}
+      </p>
+      <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={5} placeholder="Your reply to the customer"
+        className="w-full rounded-lg border border-zinc-200 p-3 text-sm outline-none focus:border-zinc-900" />
+      <div className="mt-2 flex items-center gap-3">
+        <button onClick={send} disabled={busy || !draft.trim()}
+          className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-40">{busy ? "Queuing..." : "Send as human"}</button>
+        {err && <span className="text-xs text-red-600">{err}</span>}
+      </div>
+      {d.actions.length > 0 && (
+        <ul className="mt-3 space-y-1 border-t border-zinc-100 pt-3 text-xs">
+          {d.actions.map((a) => (
+            <li key={a.id} className="flex gap-2">
+              <span className={a.done_at == null ? "text-amber-700" : a.result === "sent" ? "text-emerald-700" : "text-red-600"}>
+                {a.done_at == null ? "Queued, waiting for the runner" : a.result === "sent" ? "Sent" : a.result}
+              </span>
+              <span className="truncate text-zinc-400">{a.body}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -171,16 +213,7 @@ function Detail({ d }: { d: SessionDetail }) {
         <Timeline events={d.events} t0={d.received_at} />
       </section>
 
-      <section className="rounded-xl border-2 border-dashed border-zinc-300 bg-white p-5">
-        <h3 className="text-sm font-semibold">Take over</h3>
-        <p className="mb-2 text-xs text-zinc-500">Write the reply yourself. Only the runner sends mail, so this goes through the actions table.</p>
-        <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={5} placeholder="Your reply to the customer"
-          className="w-full rounded-lg border border-zinc-200 p-3 text-sm outline-none focus:border-zinc-900" />
-        <div className="mt-2 flex items-center gap-3">
-          <button disabled className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white opacity-40">Send as human</button>
-          <span className="text-xs text-zinc-400">Disabled until the runner reads the actions table.</span>
-        </div>
-      </section>
+      <TakeOver d={d} draft={draft} setDraft={setDraft} />
     </div>
   );
 }

@@ -1,7 +1,7 @@
 // One place the screens get data from: the real DB when it has sessions, demo data otherwise.
 import { getDb } from "./db";
 import { fakeDetail, fakeSessions } from "./fake";
-import { EventRow, MailRow, Session, SessionDetail, Stats } from "./types";
+import { ActionRow, EventRow, MailRow, QUOTE_SENT, Session, SessionDetail, Stats } from "./types";
 
 export type Source = "live" | "demo";
 
@@ -43,11 +43,13 @@ export function getDetail(id: number): { source: Source; session: SessionDetail 
   const events = (db.prepare("SELECT id, ts, kind, data FROM events WHERE thread_id=? ORDER BY id").all(id) as Record<string, unknown>[])
     .map((e): EventRow => ({ id: e.id as number, ts: e.ts as number, kind: e.kind as string, data: parse(e.data, {}) }));
   const mails = db.prepare("SELECT id, sender, subject, body, received_at, route FROM mails WHERE thread_id=? ORDER BY id").all(id) as MailRow[];
-  return { source: "live", session: { ...rowToSession(r), events, mails } };
+  let actions: ActionRow[] = [];
+  try { actions = db.prepare("SELECT id, kind, body, created_at, done_at, result FROM actions WHERE thread_id=? ORDER BY id").all(id) as ActionRow[]; } catch { /* table not created yet */ }
+  return { source: "live", session: { ...rowToSession(r), events, mails, actions } };
 }
 
 export function computeStats(sessions: Session[]): Stats {
-  const quoted = sessions.filter((s) => s.status === "quoted" || s.status === "booked");
+  const quoted = sessions.filter((s) => QUOTE_SENT.includes(s.status));
   const times = quoted.filter((s) => s.quoted_at).map((s) => (s.quoted_at as number) - s.received_at).sort((a, b) => a - b);
   const median = times.length ? times[Math.floor(times.length / 2)] : null;
   const costs = quoted.map((s) => s.llm_cost_usd ?? 0);
