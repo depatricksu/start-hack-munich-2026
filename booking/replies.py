@@ -9,7 +9,7 @@ so two customers in a row never get identical mails. The customer's first name c
     render("booked", "de", values, thread_id=123, customer="anna.schmidt@x.mail")
 values: ROUTE, AIRLINE, PRICE, REF, TRANSIT, SLOTS, FORWARDER
 """
-import random, re
+import random, re, time
 from core import db
 
 ROLE = {"info", "sales", "logistics", "ops", "operations", "export", "import", "buyer", "procurement", "purchasing",
@@ -110,9 +110,23 @@ CLOSE = {
 }
 
 
+def _signed(thread_id):
+    """The first name the customer signed the request with (humanize/, Riky), so the booking mails greet the same
+    person as the quote did."""
+    try:
+        from llm import human
+        row = db.con().execute("SELECT body FROM mails WHERE id=?", (thread_id,)).fetchone()
+        return human.signed_name(row[0]) if row else None
+    except Exception:
+        return None
+
+
 def first_name(address):
-    """anna.schmidt@x -> Anna; j.doe@x -> None (initial only); sales@x -> None."""
+    """anna.schmidt@x -> Anna; j.doe@x -> None (initial only); sales@x -> None; auer-maschinenbau@x -> None
+    (a company mailbox: "Hello Auer," went out to Tobias Auer's company, the jury reads that as a robot)."""
     local = (address or "").split("@")[0].lower()
+    if "-" in local and "." not in local:
+        return None
     part = re.split(r"[._\-+]", local)[0]
     if part in ROLE or len(part) < 2 or not part.isalpha():
         return None
@@ -140,9 +154,13 @@ def render(kind, lang, values, thread_id=0, customer=""):
         db.set_state(key, ",".join(map(str, pick)))
     except Exception:
         pass
-    name = first_name(customer)
+    from llm import human
+    name = _signed(thread_id) or first_name(customer)        # the person who signed the request, else from the address
     greet = (GREET[lang]["name"][pick[0]].replace("{NAME}", name) if name
              else GREET[lang]["anon"][pick[0] % len(GREET[lang]["anon"])])
+    if greet.startswith("Good morning"):                     # only before noon (Berlin), a booking can come at 18:00
+        hour = human._berlin(time.time()).hour
+        greet = greet.replace("Good morning", "Good morning" if hour < 12 else "Good afternoon" if hour < 18 else "Good evening", 1)
     body = BODY[kind][lang][pick[1]]
     body = body[:1].upper() + body[1:] if body[:1] != "{" else body
     text = "%s\n\n%s\n\n%s\n\n%s" % (greet, body, CLOSE[kind][lang][pick[2]], SIGN[lang][pick[3]])
