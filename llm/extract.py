@@ -35,7 +35,7 @@ Never use: "I hope this email finds you well", "Thank you for reaching out", "Ce
 State one all-in price using exactly the placeholder {PRICE}. Mention {AIRLINE} and {TRANSIT_DAYS} days transit.
 End with one easy next step: they can simply reply to book it.
 If there are several shipments, do NOT use {PRICE}, {AIRLINE} or {TRANSIT_DAYS}: put {PRICE_TABLE} on its own line where the per-shipment prices go and state the all-in total with {TOTAL}.
-Never write a number for the price yourself. Sign with exactly two lines: "{SIGNER}" and then "Air Export" (in German "Luftfracht Export")."""
+Never write a number for the price yourself. Do NOT write any closing or signature (no "Best regards", no name): our system adds it. Never use the customer's name or signature as ours."""
 
 # USD per 1M tokens (input, output). Only used for our own log; 5U measures the real cost.
 PRICES = {"gpt-4o-mini": (0.15, 0.60)}
@@ -107,6 +107,23 @@ def _weight(fields, lang):
     return (txt.replace(",", "X").replace(".", ",").replace("X", ".") + " kg") if lang == "de" else (txt + " kg")
 
 
+SIGN_OFF = {"en": ["Best regards", "Kind regards", "Best wishes"], "de": ["Viele Grüße", "Beste Grüße", "Freundliche Grüße"]}
+_CLOSING = re.compile(r"^\s*(best|kind|warm)?\s*(regards|wishes)|^\s*(many\s+)?thanks|^\s*cheers|^\s*sincerely|^\s*yours|"
+                      r"^\s*(viele|beste|freundliche|herzliche|liebe)\s+grüße|^\s*mit\s+freundlichen|^\s*\{SIGNER\}", re.I)
+
+
+def _own_signature(body, lang, thread_id):
+    """Cut whatever sign-off the model wrote (it once signed with the CUSTOMER's name) and add ours."""
+    lines = body.rstrip().split("\n")
+    for i in range(len(lines) - 1, max(len(lines) - 6, 0) - 1, -1):
+        if _CLOSING.search(lines[i]):
+            lines = lines[:i]
+            break
+    sign = SIGN_OFF[lang][zlib.crc32(str(thread_id).encode()) % len(SIGN_OFF[lang])]
+    team = "Luftfracht Export" if lang == "de" else "Air Export"
+    return "\n".join(lines).rstrip() + "\n\n%s\n%s\n%s" % (sign, SIGNER, team)
+
+
 def fill_reply(template, best, fields, customer="", thread_id=0):
     """Fill our placeholders. No usable model reply (or one with an unknown placeholder) -> a human fallback."""
     lang = "de" if (fields.get("language") or "").lower() == "de" else "en"
@@ -122,7 +139,7 @@ def fill_reply(template, best, fields, customer="", thread_id=0):
     body = re.sub(r"\{(PRICE|AIRLINE|TRANSIT_DAYS|ROUTE|WEIGHT|SIGNER|HELLO)\}", lambda m: vals[m.group(1)], template)
     if re.search(r"\{[A-Z_]+\}", body):                      # unknown placeholder from the model: use our own text
         return fill_reply("", best, fields, customer, thread_id)
-    return body
+    return _own_signature(body, lang, thread_id)
 
 
 def safe_reply(text, lang="en", multi=False):

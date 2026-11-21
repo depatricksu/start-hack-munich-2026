@@ -84,3 +84,18 @@ class TestLongMail(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestOwnSignature(unittest.TestCase):
+    """Live 16:14 round 3: the model signed our quote with the customer's name (Tobias Auer)."""
+
+    def test_customer_signature_is_replaced(self):
+        from llm.extract import fill_reply, SIGNER
+        best = {"total": "3696.00", "currency": "EUR", "airline": "Fjordline Air Cargo", "transit_days": 3}
+        t = ("Hi Tobias,\n\nthe fastest option is {AIRLINE} at {PRICE} all-in, {TRANSIT_DAYS} days.\n\n"
+             "Best regards,\nTobias Auer\nAuer Maschinenbau GmbH")
+        body = fill_reply(t, best, {"origin": "DUS", "destination": "JFK", "language": "en"}, "t.auer@x.de", 734)
+        self.assertNotIn("Tobias Auer", body)
+        self.assertNotIn("Maschinenbau", body)
+        self.assertTrue(body.rstrip().endswith(SIGNER + "\nAir Export"))
+        self.assertEqual(body.count(SIGNER), 1)
