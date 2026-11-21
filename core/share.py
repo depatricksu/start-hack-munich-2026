@@ -68,15 +68,29 @@ def start_background():
     if config.DRY_RUN or config.SHARE_EVERY_S <= 0:
         return
 
+    def _log(kind, **kw):                                    # a logging failure must never kill the uploader
+        try:
+            db.event(kind, **kw)
+        except Exception:
+            pass
+
     def loop():
-        while True:
+        while True:                                          # nothing in here may raise out of the loop, or uploads stop for good
             try:
                 size = upload()
-                db.event("snapshot_shared", size_kb=round(size / 1024))
+                _log("snapshot_shared", size_kb=round(size / 1024))
             except Exception as e:
-                db.event("snapshot_share_failed", error=str(e)[:300])
+                _log("snapshot_share_failed", error=str(e)[:300])
             time.sleep(config.SHARE_EVERY_S)
-    threading.Thread(target=loop, daemon=True).start()
+
+    def guard():                                             # if the loop ever dies anyway, respawn it instead of going silent
+        while True:
+            t = threading.Thread(target=loop, daemon=True)
+            t.start()
+            t.join()
+            _log("snapshot_share_thread_restarted")
+            time.sleep(5)
+    threading.Thread(target=guard, daemon=True).start()
 
 
 if __name__ == "__main__":

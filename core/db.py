@@ -33,7 +33,7 @@ def con():
     global _con
     if _con is None:
         os.makedirs(os.path.dirname(config.DB_PATH), exist_ok=True)
-        _con = sqlite3.connect(config.DB_PATH, isolation_level=None)   # autocommit
+        _con = sqlite3.connect(config.DB_PATH, isolation_level=None, check_same_thread=False)   # autocommit; shared with the supervisor's share thread (WAL + serialized mode)
         _con.row_factory = sqlite3.Row
         _con.execute("PRAGMA journal_mode=WAL")                        # UI can read while we write
         _con.executescript(SCHEMA)
