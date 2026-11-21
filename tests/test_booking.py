@@ -322,3 +322,22 @@ class TestHumanQuoteAccept(unittest.TestCase):
         s = db.session(97711)
         self.assertEqual(s["status"], "needs_human")
         self.assertIn("no_chosen_quote", s["note"])
+
+
+class TestNeverBookDecline(unittest.TestCase):
+    def test_negated_go_ahead_is_a_decline(self):
+        from booking.handlers import classify
+        self.assertEqual(classify("That seems too low to be right, so we will not go ahead with it."), "decline")
+        self.assertEqual(classify("We won't proceed, thanks anyway."), "decline")
+        self.assertEqual(classify("We've decided not to book this one."), "decline")
+        self.assertEqual(classify("We do not want to book this."), "decline")
+        self.assertEqual(classify("Wir werden nicht buchen."), "decline")
+
+    def test_not_yet_is_a_hold_not_a_decline(self):
+        from booking.handlers import classify
+        self.assertEqual(classify("Please do not book it yet, we are still checking."), "unclear")
+
+    def test_plain_go_ahead_still_accepts(self):
+        from booking.handlers import classify
+        self.assertEqual(classify("Great, please go ahead and book it."), "accept")
+        self.assertEqual(classify("Yes, book it."), "accept")

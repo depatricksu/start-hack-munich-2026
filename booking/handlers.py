@@ -39,6 +39,12 @@ ACCEPT = re.compile(r"\b(accept\w*|book (it|this|that|the)|please book|go ahead|
                     r"bestätig\w*|d'accord|réserv\w*|acepto|reserv\w*|confermo|prenot\w*)", re.I)
 DECLINE = re.compile(r"\b(no,? thanks?|decline\w*|not interested|cancel\w*|we pass|found another|went with another|"
                      r"nein|kein interesse|absagen|storn\w*|anderen anbieter|non merci|no gracias)\b", re.I)
+# A negated "go ahead / proceed / book" is a DECLINE, not an accept (live bug: "we will not go ahead" was booked).
+NEGATED_PROCEED = re.compile(r"\b(won'?t|will not|would not|do(es)?\s*n'?t|did\s*n'?t|cannot|can'?t|"
+                             r"not|never|decided (not|against)|rather not|prefer not|hold off|"
+                             r"nicht|werden nicht|m[oö]chten? nicht)\b[^.?!]{0,40}?"
+                             r"\b(go(ing)? ahead|proceed|book|order|confirm|move forward|buch\w*|fortfahren|best[aä]tig\w*)\b", re.I)
+HEDGE = re.compile(r"\b(yet|still|for now|at the moment|right now|checking|review\w*|noch|momentan|gerade|pr[uü]f\w*)\b", re.I)
 PRICE = re.compile(r"\b(cheaper|better price|best price|lower( the)? price|discount|too expensive|too high|negotiat\w*|"
                    r"budget|match|günstiger|rabatt|zu teuer|preis\w* (senken|nachlass|verhandeln)|moins cher|"
                    r"más barato|descuento|sconto)\b", re.I)
@@ -59,7 +65,7 @@ NEW_FACTS = re.compile(r"\d[\d.,]*\s*(kg|kgs|lbs?|t\b|tons?|tonnen|cbm|m3|m³|eu
 def classify(body):
     """accept / decline / better_price / unclear. Only the customer's new text counts, not our quoted mail below it."""
     text = re.split(r"\n\s*(>|On .+wrote:|Am .+schrieb)", body or "", maxsplit=1)[0]
-    if DECLINE.search(text):
+    if DECLINE.search(text) or (NEGATED_PROCEED.search(text) and not HEDGE.search(text)):   # definitive "won't proceed" = decline; "not yet" = wait (unclear)
         return "decline"
     if PRICE.search(text):
         return "better_price"
