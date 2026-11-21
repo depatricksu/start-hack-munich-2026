@@ -6,7 +6,7 @@
 Standard library only. PDF needs macOS (PDFKit via `swift`, the runner is a Mac) or `pdftotext`; without either a PDF
 gives "" (never an exception). Each reader is time-boxed so one odd file cannot hold up a quote.
 """
-import io, os, re, shutil, subprocess, tempfile, zipfile
+import io, os, re, shutil, subprocess, tempfile, threading, time, zipfile
 
 from .quote import read_declaration
 
@@ -73,50 +73,138 @@ def _pdf(data):
 
 IMAGE_EXT = (".jpg", ".jpeg", ".png", ".heic", ".tif", ".tiff", ".gif", ".bmp", ".webp")
 OCR_SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ocr.swift")
-OCR_BIN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "ocr_bin")   # data/ is git-ignored
-OCR_TIMEOUT_S = float(os.environ.get("DG_OCR_TIMEOUT_S", "5"))
+OCR_TIMEOUT_S = float(os.environ.get("DG_OCR_TIMEOUT_S", "5"))         # per page, once the worker is warm
+OCR_WARMUP_S = float(os.environ.get("DG_OCR_WARMUP_S", "60"))          # first page: Vision loads its model
+OCR_END = "<<<OCR-END>>>"
 _OCR_OFF_UNTIL = [0.0]   # circuit breaker: after a failure, skip OCR for 10 minutes so no request waits again
+_WORKER = {"proc": None, "warm": False}
+_LOCK = threading.Lock()
 
 
-def ocr_binary():
-    """The compiled macOS Vision OCR tool. Built once (~3 s) on first use; None when there is no swiftc (not a Mac)."""
-    if os.path.exists(OCR_BIN):
-        return OCR_BIN
-    if not shutil.which("swiftc"):
+def _ocr_bin_path():
+    """data/ocr_bin_<hash of ocr.swift>: a changed source gets a fresh build, an old binary is never reused."""
+    import hashlib
+    with open(OCR_SRC, "rb") as f:
+        tag = hashlib.sha1(f.read()).hexdigest()[:8]
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "ocr_bin_" + tag)   # git-ignored
+
+
+def ocr_binary(report=None):
+    """The compiled macOS Vision OCR tool. Built once (~3 s); None when there is no swiftc (not a Mac) or it fails."""
+    path = _ocr_bin_path()
+    if os.path.exists(path):
+        return path
+    swiftc = shutil.which("swiftc")
+    if not swiftc:
+        if report is not None:
+            report.append("swiftc not found: install Xcode Command Line Tools (xcode-select --install)")
         return None
     try:
-        os.makedirs(os.path.dirname(OCR_BIN), exist_ok=True)
-        tmp = OCR_BIN + ".%d" % os.getpid()
-        r = subprocess.run(["swiftc", "-O", OCR_SRC, "-o", tmp], capture_output=True, timeout=120)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".%d" % os.getpid()
+        r = subprocess.run([swiftc, "-O", OCR_SRC, "-o", tmp], capture_output=True, text=True, timeout=180)
         if r.returncode == 0:
-            os.replace(tmp, OCR_BIN)                           # atomic: two clerks never see half a binary
-            return OCR_BIN
-    except Exception:
-        pass
+            os.replace(tmp, path)                              # atomic: two clerks never see half a binary
+            return path
+        if report is not None:
+            report.append("swiftc failed: " + (r.stderr or r.stdout)[-600:])
+    except Exception as e:
+        if report is not None:
+            report.append("swiftc error: %r" % e)
     return None
 
 
-def ocr(data, suffix):
-    """Text in a photo / scan (macOS Vision, ~0.8 s). "" when not possible."""
-    import time
-    if time.time() < _OCR_OFF_UNTIL[0]:
-        return ""
+def _worker():
+    """One long-lived OCR process (Vision model loaded once). Started lazily, restarted if it died."""
+    p = _WORKER["proc"]
+    if p is not None and p.poll() is None:
+        return p
     binary = ocr_binary()
     if not binary:
+        return None
+    _WORKER["proc"] = subprocess.Popen([binary, "--serve"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                       stderr=subprocess.DEVNULL, bufsize=0)   # raw bytes: select() sees every byte
+    _WORKER["warm"] = False
+    return _WORKER["proc"]
+
+
+def _ask(path, timeout):
+    """Send one path to the worker, read its text until the end marker. None on timeout / crash."""
+    import select
+    p = _worker()
+    if p is None:
+        return None
+    p.stdin.write((path + "\n").encode())
+    fd, buf, end = p.stdout.fileno(), b"", OCR_END.encode()
+    deadline = time.time() + timeout
+    while end not in buf:
+        left = deadline - time.time()
+        if left <= 0 or not select.select([fd], [], [], left)[0]:
+            p.kill()                                           # stuck: drop it, the next call starts a new one
+            _WORKER["proc"] = None
+            return None
+        chunk = os.read(fd, 65536)
+        if not chunk:                                          # the worker died
+            _WORKER["proc"] = None
+            return None
+        buf += chunk
+    _WORKER["warm"] = True
+    return buf.split(end)[0].decode("utf-8", "replace").strip()
+
+
+def ocr(data, suffix):
+    """Text in a photo / scan (macOS Vision). "" when not possible. Never raises."""
+    if time.time() < _OCR_OFF_UNTIL[0]:
         return ""
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
         f.write(data)
         path = f.name
     try:
-        r = subprocess.run([binary, path], capture_output=True, text=True, timeout=OCR_TIMEOUT_S)
-        if r.returncode == 0:
-            return r.stdout
+        with _LOCK:
+            text = _ask(path, OCR_TIMEOUT_S if _WORKER["warm"] else OCR_WARMUP_S)
     except Exception:
-        pass
+        text = None
     finally:
         os.unlink(path)
-    _OCR_OFF_UNTIL[0] = time.time() + 600
-    return ""
+    if text is None:
+        _OCR_OFF_UNTIL[0] = time.time() + 600
+        return ""
+    return text
+
+
+def warm_up():
+    """Build + start the worker and read one tiny page, in the background, so the first real photo is fast."""
+    def go():
+        try:
+            sample = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "kit", "start-kit",
+                                  "danube-wings-cargo-tariff-2026-11-p2.jpg")
+            if os.path.exists(sample):
+                with _LOCK:
+                    _ask(os.path.abspath(sample), OCR_WARMUP_S)
+        except Exception:
+            pass
+    if shutil.which("swiftc") or os.path.exists(_ocr_bin_path()):
+        threading.Thread(target=go, daemon=True).start()
+
+
+def doctor():
+    """python3 -m dg.attach  -> why OCR does or does not work on this machine."""
+    report = []
+    print("swiftc:", shutil.which("swiftc"))
+    t = time.time()
+    b = ocr_binary(report)
+    print("binary:", b, "(%.1f s)" % (time.time() - t))
+    for line in report:
+        print("  ", line)
+    if not b:
+        return 1
+    sample = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "kit", "start-kit",
+                          "danube-wings-cargo-tariff-2026-11-p2.jpg")
+    for label in ("first page (loads the Vision model)", "second page (warm)"):
+        t = time.time()
+        text = _ask(os.path.abspath(sample), OCR_WARMUP_S)
+        print("%s: %.2f s, %s" % (label, time.time() - t, "OK" if text and "CGN-SYD" in text else "NO TEXT: %r" % text))
+    return 0
 
 
 def attachment_text(data, filename=""):
@@ -195,3 +283,8 @@ def scan_attachments(files):
         if info:
             return dict(info, file=name)
     return None
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(doctor())
