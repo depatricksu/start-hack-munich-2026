@@ -73,5 +73,36 @@ class Apply(unittest.TestCase):
         self.assertNotIn("1234.50", body)
 
 
+def _zip(files):
+    import io, zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for name, text in files.items():
+            z.writestr(name, text)
+    return buf.getvalue()
+
+
+class Attachments(unittest.TestCase):
+    def test_xlsx_packing_list(self):
+        shared = ('<sst><si><t>Description</t></si><si><t>Industrial adhesives</t></si>'
+                  '<si><t>Dangerous goods: UN1133, Class 3, Adhesives</t></si></sst>')
+        sheet = ('<worksheet><sheetData><row><c t="s"><v>0</v></c><c t="s"><v>1</v></c></row>'
+                 '<row><c t="s"><v>2</v></c><c><v>42</v></c></row></sheetData></worksheet>')
+        data = _zip({"xl/sharedStrings.xml": shared, "xl/worksheets/sheet1.xml": sheet})
+        self.assertIn("UN1133", dg.attachment_text(data, "PL_53839.xlsx"))
+        info = dg.scan_attachments([("PL_53839.xlsx", data)])
+        self.assertEqual((info["un"], info["class"], info["file"]), ("UN1133", "3", "PL_53839.xlsx"))
+
+    def test_docx_sli(self):
+        doc = '<w:document><w:body><w:p><w:r><w:t>Dangerous goods: UN1950, Class 2.1, Aerosols</w:t></w:r></w:p></w:body></w:document>'
+        data = _zip({"word/document.xml": doc})
+        self.assertEqual(dg.scan_attachments([("SLI.docx", data)])["un"], "UN1950")
+
+    def test_clean_files_and_garbage_give_none(self):
+        self.assertIsNone(dg.scan_attachments([("note.txt", b"General cargo, non-dangerous")]))
+        self.assertEqual(dg.attachment_text(b"PK\x03\x04broken", "x.xlsx"), "")
+        self.assertIsNone(dg.scan_attachments([]))
+
+
 if __name__ == "__main__":
     unittest.main()
