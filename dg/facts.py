@@ -93,6 +93,24 @@ def override():
     return os.environ.get("ATTACH_OVERRIDE", "1") == "1"
 
 
+_FILE = (r"(?:attach\w*|packing[\s-]?list|file|document|spreadsheet|anhang|anlage|packliste|datei|pi[èe]ce[\s-]jointe|fichier|"
+         r"liste de colisage|allegat\w*|distinta|adjunt\w*|lista de empaque)")
+_STALE = (r"(?:outdated|out[\s-]of[\s-]date|obsolete|old(?:er)? version|wrong|incorrect|superseded|"
+          r"not (?:correct|up[\s-]to[\s-]date|current|valid)|no longer (?:correct|valid|current)|ignore|disregard|"
+          r"veraltet\w*|überholt\w*|falsch\w*|nicht (?:mehr )?(?:aktuell|gültig)|ignorier\w*|"
+          r"périmé\w*|obsol[èe]t\w*|n'est (?:plus|pas) (?:valable|à jour)|ne (?:pas )?tenir compte|"
+          r"non (?:[èe] |sono )?(?:pi[ùu] )?(?:aggiornat\w*|valid\w*|corrett\w*)|sbagliat\w*|errat\w*|"
+          r"desactualizad\w*|incorrect\w*|equivocad\w*|no (?:es )?v[áa]lid\w*)")
+DISOWNED = re.compile(r"\b%s\b[^.!?\n]{0,80}%s|%s[^.!?\n]{0,80}\b%s\b" % (_FILE, _STALE, _STALE, _FILE), re.I)
+
+
+def mail_disowns_attachment(text):
+    """'The attached packing list is OUTDATED, the correct weight is 820 kg.' Then the mail is the newer document and
+    the packing list must not beat it (Patrick's red-team run, 21 Nov 23:29: we priced the file's 540 kg). One
+    sentence must name both the file and that it is old / wrong / to be ignored."""
+    return bool(DISOWNED.search(text or ""))
+
+
 def winner(d):
     """Which number to price on: the attachment's, unless it is so far from the mail that we probably misread it."""
     try:

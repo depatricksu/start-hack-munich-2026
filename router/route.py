@@ -34,10 +34,19 @@ SHIPMENT = re.compile(r"(?i:\d[\d.,]*\s*(?:kg|kgs|lbs?|tons?|tonnen|cbm|m3|m³)\
 CARRIERS = {r["email"].lower(): r for r in csv.DictReader(open(os.path.join(_KIT, "carrier-list.csv")))}
 
 
+# 'Undelivered Mail Returned to Sender ... [BID-152]' from mailer-daemon@ was routed as a new request: one gateway call
+# and a quote sent to the daemon (Patrick's red-team run, 21 Nov 23:29).
+BOUNCE_SENDER = re.compile(r"^(?:mailer-daemon|postmaster|mail-daemon|bounces?|no-?reply-bounce)[^@]*@", re.I)
+BOUNCE_SUBJECT = re.compile(r"undelivered mail|undeliverable|delivery status notification|mail delivery (?:failed|failure|subsystem)|"
+                            r"returned mail|delivery failure|failure notice|nicht zustellbar|unzustellbar", re.I)
+
+
 def route(mail, our_address="google@hackloop.mail"):
     sender, subject = mail["sender"], mail["subject"].lower()
     if sender == our_address:
         return "own"
+    if BOUNCE_SENDER.search(sender) or BOUNCE_SUBJECT.search(subject):   # never a request: no gateway call, no quote to a daemon
+        return "bounce"
     if sender == "tracking@hackloop.mail":                    # exact: tracking@evil.mail is a customer. FIRST: a tracking
         return "tracking"                                    # question 'Status of booking BK-...' is not a confirmation
     if re.search(r"booking\s+bk-", subject):

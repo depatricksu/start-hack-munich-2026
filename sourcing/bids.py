@@ -246,6 +246,18 @@ def _find(mail):
     return dict(r) if r else None
 
 
+def on_bounce(mail):
+    """Our bid mail came back undelivered: that carrier will never answer, so the quote must not wait for it."""
+    ensure()
+    m = REF.search((mail.get("subject") or "") + " " + (mail.get("body") or ""))
+    r = db.con().execute("SELECT * FROM bids WHERE id=?", (int(m.group(1)),)).fetchone() if m else None
+    if r and not r["replied_at"]:
+        db.con().execute("UPDATE bids SET replied_at=?, status='send_failed', note=? WHERE id=?",
+                         (time.time(), "our bid mail bounced", r["id"]))
+    db.event("bid_bounced" if r else "bounce", r["thread_id"] if r else mail.get("thread_id"), mail.get("id"),
+             bid_id=r["id"] if r else None, sender=mail.get("sender"), subject=mail.get("subject"))
+
+
 def on_reply(mail):
     ensure()
     bid = _find(mail)
