@@ -437,5 +437,40 @@ class TestMultiShipmentFilters(unittest.TestCase):
         self.assertNotIn("Yellowtail Air Freight", [p["best"]["airline"] for p in parts])
 
 
+class TestRound11Batch3(TestRound5Batch1):
+    """Red-team round 11: more after-booking mails, out-of-office on our question, wording of an airline-cancelled booking."""
+    def test_cancel_change_complaint_reach_a_human(self):
+        pass
+
+    def test_thank_you_after_booking_is_quiet(self):
+        pass
+
+    def test_more_after_booking_kinds(self):
+        from core import db
+        for i, (body, kind) in enumerate((("Sorry, wrong thread, please ignore my last mail.", "RETRACTION"),
+                                          ("Please send us the invoice and the AWB number.", "DOCUMENTS"),
+                                          ("Please book the same shipment again for next week.", "NEW_REQUEST"))):
+            tid = 9880000 + i * 10
+            self._booked(tid)
+            self._reply(tid, 1, body)
+            self.assertIn(kind, db.session(tid)["note"])
+
+    def test_out_of_office_on_our_question(self):
+        from core import db, mailbox
+        from booking import handlers
+        tid = 9880100
+        m = mailbox.normalize({"id": tid, "from": "sara@lindqvist-medtech.mail", "subject": "Air freight quote", "body": "x"})
+        db.save_mail(m); db.new_session(m)
+        db.update_session(tid, status="asked_customer", customer="sara@lindqvist-medtech.mail")
+        handlers.handle_follow_up(mailbox.normalize({"id": tid + 1, "from": "sara@lindqvist-medtech.mail", "subject": "Automatic reply",
+                                                     "body": "I am out of the office until Monday.", "in_reply_to": tid, "references": [tid]}))
+        self.assertEqual(db.session(tid)["status"], "asked_customer")
+
+    def test_cancelled_by_airline_wording(self):
+        from booking import tracking
+        self.assertNotIn("_", tracking.STATUS_TEXT["cancelled_by_airline"])
+        self.assertNotIn("_", tracking.STATUS_TEXT_DE["cancelled_by_airline"])
+
+
 if __name__ == "__main__":
     unittest.main()

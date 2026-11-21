@@ -387,9 +387,17 @@ _THANKS_ONLY = re.compile(r"^\W*(?:(?:many |thank you|thanks|danke|vielen dank|m
                           r"ok|noted|received|erhalten|top|wonderful|excellent)[\w\s,.!']{0,60})$", re.I)
 POST_BOOKING = [   # (kind, rule): what a customer writes after the booking that a forwarder must act on
     ("cancellation", re.compile(r"\b(cancel\w*|storn\w*|annul\w*|call (?:it )?off|no longer needed|nicht mehr ben[öo]tigt)\b", re.I)),
+    ("retraction", re.compile(r"\b(wrong (?:thread|mail|e-?mail|address|recipient)|(?:please )?(?:ignore|disregard) (?:my|the|our) "
+                              r"(?:last|previous|earlier) (?:mail|e-?mail|message|reply)|sent (?:it )?by mistake|falsche[rn]? "
+                              r"(?:mail|empf[äa]nger)|bitte (?:ignorieren|nicht beachten))\b", re.I)),
     ("complaint", re.compile(r"\b(did ?n[o']t (?:show|arrive|come|turn up)|not (?:shown|arrived|picked up)|no(?:body| one) came|"
                              r"still waiting|damaged|broken|missing|complain\w*|unacceptable|"
                              r"nicht (?:gekommen|abgeholt|erschienen)|beschädigt|reklamation|beschwerde)\b", re.I)),
+    ("documents", re.compile(r"\b(invoice|rechnung|fattura|facture|factura|air ?waybill|awb (?:number|copy|no)|"
+                             r"awb\b|proof of delivery|\bpod\b|frachtbrief|booking confirmation (?:as )?(?:pdf|document))\b", re.I)),
+    ("new_request", re.compile(r"\b(same (?:shipment|again|lane|route)|another (?:shipment|consignment|booking|order)|"
+                               r"next (?:shipment|week's shipment)|new (?:request|shipment|booking|order)|book (?:it )?again|"
+                               r"noch eine sendung|weitere sendung|gleiche sendung|nochmal buchen)\b", re.I)),
     ("change", re.compile(r"\b(change|changed|instead|new (?:date|address|pickup|weight)|postpone\w*|delay\w*|moved?|"
                           r"only (?:be )?ready on|not ready|verschieb\w*|änder\w*|neue[rs]? (?:termin|datum|adresse)|"
                           r"\d+\s*(?:kg|cbm|m3|pallets?|pieces)|20\d\d-\d\d-\d\d)\b", re.I)),
@@ -558,6 +566,8 @@ def reprice_answer(s, mail):
 def handle_follow_up(mail):
     tid = mail["thread_id"]
     s = db.session(tid)
+    if s and s["status"] == "asked_customer" and AUTO_REPLY.search(own_text(mail["body"], mail.get("subject"))):
+        return db.event("clarify_auto_reply_ignored", tid, mail["id"])   # out-of-office robot: still waiting for the answer
     if s and s["status"] == "asked_customer":                    # answer to our clarifying question (llm/clarify.py)
         from llm import clarify
         return clarify.answer(mail)
