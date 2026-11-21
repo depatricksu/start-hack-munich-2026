@@ -12,7 +12,7 @@ SIGNER = os.environ.get("SIGNER", "Lena Hofmann")   # the person who signs our m
 
 SYSTEM = """You work at an air freight forwarder in Germany. Read the customer's email and answer with JSON only:
 {
- "origin": IATA code of the German departure airport (FRA, MUC, DUS, HAM, STR, CGN) or null if not given,
+ "origin": IATA code of the departure airport (usually FRA, MUC, DUS, HAM, STR or CGN, but use whatever airport the customer names) or null if not given,
  "destination": IATA code of the destination airport or null,
  "pickup_postcode": German postcode if the customer wants pickup at their door, else null,
  "weight_kg": total gross weight in kg if stated as a total, else null,

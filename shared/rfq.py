@@ -45,6 +45,25 @@ PICKUP_ZONES = _load_zones()                    # "80" -> "MUC"
 ORIGINS = set(PICKUP_ZONES.values())            # FRA MUC DUS HAM STR CGN
 DESTINATIONS = _load_destinations()             # every IATA code someone serves
 
+
+def live_lanes() -> set[tuple[str, str]]:
+    """Lanes the portal prices RIGHT NOW (sourcing/portal.py re-reads /v1/portal/ports every 3 min).
+    5U changes the setup hourly: a new origin or destination there must not send a request to a human."""
+    try:
+        from sourcing import portal
+        portal.refresh_lanes()                      # at most one free read every 3 min, no-op without a key
+        return set(portal.LANES)
+    except Exception:
+        return set()
+
+
+def known_origins() -> set[str]:
+    return ORIGINS | {o for o, _ in live_lanes()}
+
+
+def known_destinations() -> set[str]:
+    return DESTINATIONS | {d for _, d in live_lanes()}
+
 # City names customers may write instead of codes (EN + DE + local spellings).
 CITY_TO_IATA = {
     # other languages (Erik's dry run: Italian "Francoforte" / "Dubai" gave destination=null)
@@ -152,7 +171,7 @@ def _num(s: str) -> float:
 def _find_place(text: str) -> tuple[list[str], list[str]]:
     """(IATA codes, codes from city names), each in the order they appear.
     Explicit codes win: a pickup city ("collect in Hamburg") must not beat "from FRA"."""
-    known = ORIGINS | DESTINATIONS
+    known = known_origins() | known_destinations()
     codes = [m.group(1) for m in re.finditer(r"\b([A-Z]{3})\b", text) if m.group(1) in known]
     low = text.lower()
     hits = sorted((m.start(), code) for name, code in CITY_TO_IATA.items()
@@ -168,8 +187,9 @@ def extract_rfq(subject: str, body: str, **envelope) -> RFQ:
     # route: "X to Y", "X -> Y", "X - Y", "from X ... to Y", or first origin + first destination
     codes, cities = _find_place(text)
     for places in (codes, cities):
-        origins = [p for p in places if p in ORIGINS]
-        dests = [p for p in places if p in DESTINATIONS and p not in ORIGINS]
+        org, dst = known_origins(), known_destinations()
+        origins = [p for p in places if p in org]
+        dests = [p for p in places if p in dst and p not in org]
         r.origin = r.origin or (origins[0] if origins else None)
         r.destination = r.destination or (dests[0] if dests else None)
 
@@ -252,12 +272,14 @@ def validate(r: RFQ) -> list[Issue]:
     # required
     if not r.origin:
         add("origin", Level.MISSING, "no origin airport or pickup postcode")
+    elif r.origin not in known_origins():
+        add("origin", Level.HUMAN, f"{r.origin} is not an export airport we or the portal serve {sorted(known_origins())}")
     elif r.origin not in ORIGINS:
-        add("origin", Level.HUMAN, f"{r.origin} is not one of our export airports {sorted(ORIGINS)}")
+        add("origin", Level.WARNING, f"{r.origin} is a new origin (on the portal since 5U's last change)")
     if not r.destination:
         add("destination", Level.MISSING, "no destination")
-    elif r.destination not in DESTINATIONS:
-        add("destination", Level.HUMAN, f"nobody in the carrier list serves {r.destination}")
+    elif r.destination not in known_destinations():
+        add("destination", Level.HUMAN, f"nobody in the carrier list or on the portal serves {r.destination}")
     if r.weight_kg is None:
         add("weight_kg", Level.MISSING, "no weight")
     elif r.weight_kg <= 0 or r.weight_kg > 100_000:          # portal max is 100 t: never quote outside

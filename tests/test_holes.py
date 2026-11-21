@@ -99,3 +99,19 @@ class TestOwnSignature(unittest.TestCase):
         self.assertNotIn("Maschinenbau", body)
         self.assertTrue(body.rstrip().endswith(SIGNER + "\nAir Export"))
         self.assertEqual(body.count(SIGNER), 1)
+
+
+class TestNewPlaces(unittest.TestCase):
+    """5U's hourly change can add an origin or destination on the portal: it must be quoted, not sent to a human."""
+
+    def test_new_portal_origin_is_accepted(self):
+        from unittest import mock
+        from sourcing import portal
+        with mock.patch.dict(portal.LANES, {("BER", "JFK"): [{"code": "SL", "name": "Solace"}]}):
+            ok, note = gate(fields(origin="BER", destination="JFK"), dict(MAIL, body="300 kg BER to JFK"))
+        self.assertTrue(ok, note)
+        self.assertIn("new origin", note)
+
+    def test_unknown_everywhere_still_stops(self):
+        ok, note = gate(fields(origin="VIE", destination="JFK"), dict(MAIL, body="300 kg VIE to JFK"))
+        self.assertFalse(ok)
