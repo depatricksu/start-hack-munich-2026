@@ -473,6 +473,20 @@ def _text(mail):
     return "%s\n%s" % (mail.get("subject") or "", mail.get("body") or "")
 
 
+def _lang_text(mail):
+    """The customer's own words for language detection: a quoted or forwarded chain below their text is cut
+    (a German request on top of a forwarded English mail is German), attached-file text is kept."""
+    body = mail.get("body") or ""
+    head, sep, files = body.partition("\n\n[Files attached to this email")
+    return "%s\n%s%s%s" % (mail.get("subject") or "", human.own_text(head), sep, files)
+
+
+def detect_lang(mail):
+    """Own words first; when they are too few to tell, the whole mail as before (so a short request keeps the
+    old answer)."""
+    return langmod.detect(_lang_text(mail)) or langmod.detect(_text(mail))
+
+
 def _annotate(fields, mail, detected):
     """What the reply gate needs later: the customer's language (code wins when it is sure), numbers and sign-off."""
     if detected:
@@ -576,7 +590,7 @@ def _merge_usage(first, second):
 def extract(mail):
     """Returns (fields dict, usage dict). Exactly one gateway call when it works; a failed call (429, 5xx, timeout)
     is retried inside one shared time budget, and only raises (-> needs_human) when that is used up."""
-    detected = langmod.detect(_text(mail))                  # counted in code, no call
+    detected = detect_lang(mail)                            # counted in code, no call
     if config.LLM_FAKE:
         return _annotate(_fake(mail), mail, detected), {"fake": True}
     deadline, tid = _budget(mail), mail.get("thread_id")
