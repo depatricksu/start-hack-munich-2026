@@ -64,9 +64,18 @@ CONDITION = re.compile(r"\b(but|however|only if|as long as|unless|later|next wee
 NEW_FACTS = re.compile(r"\d[\d.,]*\s*(kg|kgs|lbs?|t\b|tons?|tonnen|cbm|m3|m³|eur|€|usd|\$|chf|pcs|pieces|pallets?|"
                        r"paletten|colli)|(eur|€|\$|usd)\s*\d", re.I)
 
+# "Good point, we will send the dangerous goods documents shortly": the customer is PROCEEDING after our DG ask,
+# not declining and not a clear yes. Acknowledge and await the papers instead of handing it to a human.
+_DOCS = (r"(shipper'?s? declaration|safety data sheet|\bmsds\b|\bsds\b|\bdgd\b|dangerous goods?[^.?!]{0,20}"
+         r"(document|paper|declaration|sheet)|gefahrgut\w*[^.?!]{0,20}(dokument|papier|erkl[aä]rung)|"
+         r"document\w*[^.?!]{0,20}(marchandises dangereuses|peligros))")
+_SEND = (r"(send|provide|forward|share|supply|pass (?:it |them |you )?along|get (?:you |it )?|"
+         r"senden|schicken|nachreich\w*|zusenden|zukommen|envoy\w*|enviar\w*|invi\w*)")
+SENDING_DOCS = re.compile(_SEND + r"[^.?!]{0,60}?" + _DOCS + r"|" + _DOCS + r"[^.?!]{0,60}?" + _SEND, re.I)
+
 
 def classify(body):
-    """accept / decline / better_price / unclear. Only the customer's new text counts, not our quoted mail below it."""
+    """accept / decline / better_price / sending_docs / unclear. Only the customer's new text counts, not our quoted mail below it."""
     text = re.split(r"\n\s*(>|On .+wrote:|Am .+schrieb)", body or "", maxsplit=1)[0]
     if DECLINE.search(text) or (NEGATED_PROCEED.search(text) and not HEDGE.search(text)):   # definitive "won't proceed" = decline; "not yet" = wait (unclear)
         return "decline"
@@ -74,7 +83,27 @@ def classify(body):
         return "better_price"
     if ACCEPT.search(text) and not QUESTION.search(text) and not CONDITION.search(text) and not NEW_FACTS.search(text):
         return "accept"
+    if SENDING_DOCS.search(text):              # proceeding, just sending the DG papers first
+        return "sending_docs"
     return "unclear"
+
+
+ACK_DOCS = {
+    "en": "Thank you, that is perfect. Please send the dangerous goods documents whenever they are ready, and I will confirm the booking right away.",
+    "de": "Vielen Dank, das passt bestens. Senden Sie uns die Gefahrgutdokumente einfach, sobald sie bereit sind, und ich bestätige die Buchung umgehend.",
+    "it": "Grazie, perfetto. Ci invii pure i documenti per le merci pericolose non appena pronti e confermo subito la prenotazione.",
+    "fr": "Merci, c'est parfait. Envoyez-nous les documents marchandises dangereuses dès qu'ils sont prêts et je confirme la réservation tout de suite.",
+    "es": "Gracias, perfecto. Envíenos los documentos de mercancía peligrosa en cuanto estén listos y confirmo la reserva de inmediato.",
+}
+
+
+def _await_docs(tid, mail, s):
+    """Customer will send the DG documents: acknowledge, await them, then book when they arrive."""
+    lang = (json.loads(s["fields"] or "{}").get("language") or "en")[:2].lower()
+    subject = s["subject"] if (s["subject"] or "").lower().startswith("re:") else "Re: " + (s["subject"] or "")
+    mailbox.send(s["customer"], subject, ACK_DOCS.get(lang, ACK_DOCS["en"]), in_reply_to=tid, thread_id=tid)
+    db.update_session(tid, status="awaiting_docs", note="customer will send DG documents; await then book")
+    return db.event("awaiting_docs", tid, mail["id"], customer=s["customer"])
 
 
 def _values(b, lang):
@@ -236,7 +265,7 @@ def handle_follow_up(mail):
     if s and s["status"] == "asked_customer":                    # answer to our clarifying question (llm/clarify.py)
         from llm import clarify
         return clarify.answer(mail)
-    if not s or s["status"] not in ("quoted", "meeting_proposed"):
+    if not s or s["status"] not in ("quoted", "meeting_proposed", "awaiting_docs"):
         return db.event("follow_up_ignored", tid, mail["id"], status=s and s["status"])
     if mail["sender"] != (s["customer"] or "").lower():          # only the customer who asked can book on this quote
         return _needs_human(tid, mail["id"], "reply from %s, not from the customer %s" % (mail["sender"], s["customer"]))
@@ -248,8 +277,12 @@ def handle_follow_up(mail):
         return db.update_session(tid, status="lost", note="customer declined")       # no mail, just closed
     if verdict == "better_price":
         return handle_better_price(s, mail)
-    if verdict == "unclear":
-        return _needs_human(tid, mail["id"], "customer answered the quote, not a clear yes or no")
+    if s["status"] != "awaiting_docs":                   # on a quote still open, a soft/unclear reply does not book
+        if verdict == "sending_docs":                    # "we'll send the DG papers": acknowledge, await, then book
+            return _await_docs(tid, mail, s)
+        if verdict == "unclear":
+            return _needs_human(tid, mail["id"], "customer answered the quote, not a clear yes or no")
+    # status == awaiting_docs and not a decline: the promised documents arrived -> proceed to book below
 
     chosen, fields = (json.loads(s["chosen"] or "null") or chosen_from_reply(s)), json.loads(s["fields"] or "{}")
     if not chosen:                                             # quote sent by a human with a price we cannot match

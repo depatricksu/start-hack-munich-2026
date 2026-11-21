@@ -341,3 +341,29 @@ class TestNeverBookDecline(unittest.TestCase):
         from booking.handlers import classify
         self.assertEqual(classify("Great, please go ahead and book it."), "accept")
         self.assertEqual(classify("Yes, book it."), "accept")
+
+
+class TestSendingDocs(unittest.TestCase):
+    def test_sending_dg_docs_awaits_then_books(self):
+        tid = 1700
+        self.assertEqual(quote(tid, portal=True)["status"], "quoted")
+        answer(tid, 1, "Thank you, good point. We will send you the dangerous goods documents shortly.")
+        s = db.session(tid)
+        self.assertEqual(s["status"], "awaiting_docs")                 # not needs_human
+        self.assertTrue(sent(tid), "an acknowledgement went out")      # we replied, did not sit silent
+        answer(tid, 2, "Here are the dangerous goods documents attached. Please proceed.")
+        self.assertIn(db.session(tid)["status"], ("booked", "booking", "confirmed"))   # docs arrived -> booked
+
+    def test_clear_accept_still_books_directly(self):
+        tid = 1710
+        quote(tid, portal=True)
+        answer(tid, 1, "Yes, please go ahead and book it.")
+        self.assertIn(db.session(tid)["status"], ("booked", "booking", "confirmed"))
+
+    def test_decline_on_awaiting_docs_is_lost(self):
+        tid = 1720
+        quote(tid, portal=True)
+        answer(tid, 1, "We will send the dangerous goods documents shortly.")
+        self.assertEqual(db.session(tid)["status"], "awaiting_docs")
+        answer(tid, 2, "On second thought, we will not go ahead. Thanks anyway.")
+        self.assertEqual(db.session(tid)["status"], "lost")
