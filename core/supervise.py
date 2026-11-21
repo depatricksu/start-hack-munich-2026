@@ -8,7 +8,7 @@ If the clerk dies right after starting 3 times in a row, the new code is broken:
 and shouts in the terminal and with a Mac notification. Stop everything with Ctrl+C.
 """
 import os, shutil, subprocess, sys, time
-from . import config, db, safety, share
+from . import alarm, config, db, safety, share
 
 QUICK_DEATH_S = 15
 
@@ -29,6 +29,7 @@ def main():
     env = dict(os.environ, SUPERVISED="1")
     quick_deaths = 0
     share.start_background()                                 # snapshot of the DB for the team, every 15 min
+    alarm.start_background()                                 # problems go to the agent chat by themselves
     while True:
         started = time.time()
         code = subprocess.call(cmd, cwd=config.ROOT, env=env)

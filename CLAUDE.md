@@ -104,6 +104,7 @@ DRY_RUN=1 LLM_FAKE=0 python3 -m core.main      # also call the real gateway (cos
 DRY_RUN=0 python3 -m core.supervise            # Erik's MacBook only: starts the clerk, restarts it after a crash
 python3 -m core.restart                        # runner, after `git pull`: tests + fake mail, then a clean restart
 python3 -m core.restart --check                # anyone: is my code safe to go live?
+python3 -m core.alarm                          # runner, own Terminal: posts problems into the agent chat with the full log
 python3 -m core.share --get                    # anyone: download the runner's newest data (real mails, bids, verdicts)
 python3 -m core.replay                         # anyone: old quote vs today's code vs 5U's points, on the real requests
 DB_PATH=examples/real/snapshot.db python3 -m core.stats   # any tool on the real data, without touching the live DB
