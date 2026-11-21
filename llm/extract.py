@@ -6,7 +6,7 @@ The model never does math and never invents a price. It returns:
 """
 import http.client, json, os, re, time, zlib
 from core import config, mailbox
-from . import lang as langmod, quality
+from . import lang as langmod, quality, human
 
 SIGNER = os.environ.get("SIGNER", "Lena Hofmann")   # the person who signs our mails (jury: most human email)
 
@@ -24,6 +24,7 @@ SYSTEM = """You work at an air freight forwarder in Germany. Read the customer's
  "shipments": if multi_shipment is true, one object per shipment with the same keys as above: [{"origin", "destination", "pickup_postcode", "weight_kg", "volume_cbm", "pieces", "prefer"}], else [],
  "dangerous_goods": true if dangerous goods, hazmat, DGR, UN numbers or lithium batteries are mentioned, else false,
  "currency": currency code if the customer asks for a specific currency, else null,
+ "customer_city": the city the customer is based in (from their signature, company address or pickup address), in English, or null,
  "language": ISO 639-1 code of the language the customer wrote in ("en", "de", ...),
  "missing": list of fields you could not find,
  "reply": the reply email body
@@ -232,10 +233,24 @@ def final_reply(template, best, fields, customer="", thread_id=0):
     is one of our own human templates instead (same price). No gateway call."""
     lang = reply_lang(fields)
     names = [n for n in re.split(r"[._\-+]", (customer or "").split("@")[0]) if len(n) > 3]
-    body = _fill(template, best, fields, customer, thread_id, lang)
-    reasons = quality.check(body, lang, best, fields, customer, SIGNER, names)
+    plain = _fill(template, best, fields, customer, thread_id, lang)
+    reasons = quality.check(plain, lang, best, fields, customer, SIGNER, names)
     if reasons:
-        body = _fill("", best, fields, customer, thread_id, lang)
+        plain = _fill("", best, fields, customer, thread_id, lang)
+    try:                                                     # personal touch (llm/human.py): any error -> plain mail
+        style = human.choose(fields, lang, thread_id)
+        body = human.apply(plain, style, fields, lang)
+        if body != plain and quality.check(body, lang, best, fields, customer, SIGNER, names):
+            body, style = plain, "control"                   # the touch must never cost us a clean mail
+        fields["human_style"] = style
+        _log("human_style", thread_id, style=style, city=human.customer_city(fields))
+        try:
+            human.record(thread_id, style)
+        except Exception as e:                               # learning is optional, the mail is not
+            _log("human_learn_error", thread_id, error=str(e)[:200])
+    except Exception as e:
+        body = plain
+        _log("human_touch_error", thread_id, error=str(e)[:200])
     return body, reasons
 
 
