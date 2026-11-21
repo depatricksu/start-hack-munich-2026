@@ -498,6 +498,13 @@ def handle_follow_up(mail):
     _tell_customer(crm.get(tid), kind)
 
 
+# An airline / portal mail about a booking that says NO. Before, every "Booking BK-..." mail counted as confirmed and the
+# customer was told "confirmed, everything is set" (red-team round 5).
+AIRLINE_NO = re.compile(r"\b(cancel+(?:ed|ation)?|rejected|refused|declined|not (?:be )?confirmed|unable to (?:confirm|accept)|"
+                        r"cannot (?:confirm|accept)|no (?:capacity|space)|fully booked|failed|void(?:ed)?|"
+                        r"storniert|abgelehnt|nicht bestätigt|keine kapazität|ausgebucht)\b", re.I)
+
+
 def handle_booking_confirmation(mail):
     if mail["sender"] not in CARRIER_SENDERS and not _SYSTEM_SENDER.match(mail["sender"]):                    # customers and strangers cannot confirm bookings
         return db.event("confirmation_rejected_sender", mail["thread_id"], mail["id"], sender=mail["sender"])
@@ -512,6 +519,12 @@ def handle_booking_confirmation(mail):
         b = None                                                 # mail booking: only the airline we asked confirms
     if not b:
         return db.event("confirmation_unmatched", mail["thread_id"], mail["id"], subject=mail["subject"])
+    if AIRLINE_NO.search(text):                                  # "Booking BK-... cancelled: no capacity" is NOT a confirmation
+        crm.upsert(b["thread_id"], status="cancelled_by_airline", raw={"airline_mail": text[:1500]})
+        db.update_session(b["thread_id"], status="needs_human",
+                          note="AIRLINE CANCELLED/REFUSED the booking: rebook and tell the customer. Airline: %s" % text.replace("\n", " ")[:400])
+        return db.event("booking_cancelled_by_airline", b["thread_id"], mail["id"], sender=mail["sender"],
+                        booking_reference=ref and ref.group(0))
     if b["status"] == "confirmed":
         return db.event("confirmation_duplicate", b["thread_id"], mail["id"])
     crm.upsert(b["thread_id"], status="confirmed", confirmed_at=time.time(),

@@ -229,5 +229,31 @@ class TestBackAndForth(unittest.TestCase):
         self.assertTrue(json.loads(db.session(tid)["options"]))            # sheet prices for the new weight
 
 
+class TestAirlineSaysNo(unittest.TestCase):
+    """Red-team round 5 (21 Nov ~23:15): 'Booking BK-... cancelled: no capacity' was handled as a confirmation and the
+    customer was told 'confirmed, everything is set'."""
+    def test_cancelled_booking_is_not_confirmed(self):
+        from core import db, mailbox
+        from booking import crm, handlers
+        tid = 9830000
+        m = mailbox.normalize({"id": tid, "from": "sara@lindqvist-medtech.mail", "subject": "Air freight FRA-ORD", "body": "x"})
+        db.save_mail(m); db.new_session(m)
+        db.update_session(tid, status="booked", customer="sara@lindqvist-medtech.mail")
+        crm.upsert(tid, customer="sara@lindqvist-medtech.mail", subject="Air freight FRA-ORD", last_customer_mail_id=tid,
+                   airline="Meridian Freightways", origin="FRA", destination="ORD", status="booked", booking_reference="BK-CANC0001")
+        handlers.handle_booking_confirmation(mailbox.normalize({"id": tid + 1, "from": "no-reply@hackloop.mail",
+            "subject": "Booking BK-CANC0001 cancelled", "body": "Booking BK-CANC0001 was cancelled: no capacity on the flight."}))
+        self.assertEqual(crm.get(tid)["status"], "cancelled_by_airline")
+        self.assertEqual(db.session(tid)["status"], "needs_human")
+        sent = [r for r in db.con().execute("SELECT data FROM events WHERE thread_id=? AND kind LIKE 'mail_out%'", (tid,))]
+        self.assertEqual(sent, [])                                         # nobody tells the customer "confirmed"
+
+    def test_real_confirmation_wording_still_confirms(self):
+        from booking.handlers import AIRLINE_NO
+        for t in ("Booking BK-AW8CXJCM confirmed", "Your booking BK-AW8CXJCM is confirmed. Flight MD 123 departs 26 Nov.",
+                  "Booking BK-X1 confirmed, no changes."):
+            self.assertIsNone(AIRLINE_NO.search(t), t)
+
+
 if __name__ == "__main__":
     unittest.main()
