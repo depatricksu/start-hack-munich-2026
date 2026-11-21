@@ -278,8 +278,9 @@ def handle_follow_up(mail):
     if verdict == "better_price":
         return handle_better_price(s, mail)
     if s["status"] != "awaiting_docs":                   # on a quote still open, a soft/unclear reply does not book
-        if verdict == "sending_docs":                    # "we'll send the DG papers": acknowledge, await, then book
-            return _await_docs(tid, mail, s)
+        if verdict == "sending_docs":                    # "we'll send the DG papers" IS the yes for 5U (rounds 39-41 counted
+            db.event("sending_docs_book_now", tid, mail["id"])   # accepted). Book NOW: the rate ID expires in ~15 min and a
+            # second customer mail may never come (Kai's review of #36). The papers can follow the booking. (Riky)
         if verdict == "unclear":
             return _needs_human(tid, mail["id"], "customer answered the quote, not a clear yes or no")
     # status == awaiting_docs and not a decline: the promised documents arrived -> proceed to book below

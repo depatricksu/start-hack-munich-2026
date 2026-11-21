@@ -344,15 +344,13 @@ class TestNeverBookDecline(unittest.TestCase):
 
 
 class TestSendingDocs(unittest.TestCase):
-    def test_sending_dg_docs_awaits_then_books(self):
+    def test_sending_dg_docs_books_right_away(self):
+        """'We will send the DG documents' is the customer's yes (5U counted rounds 39-41 accepted): book now, the
+        rate ID expires in ~15 min and a second mail may never come."""
         tid = 1700
         self.assertEqual(quote(tid, portal=True)["status"], "quoted")
         answer(tid, 1, "Thank you, good point. We will send you the dangerous goods documents shortly.")
-        s = db.session(tid)
-        self.assertEqual(s["status"], "awaiting_docs")                 # not needs_human
-        self.assertTrue(sent(tid), "an acknowledgement went out")      # we replied, did not sit silent
-        answer(tid, 2, "Here are the dangerous goods documents attached. Please proceed.")
-        self.assertIn(db.session(tid)["status"], ("booked", "booking", "confirmed"))   # docs arrived -> booked
+        self.assertIn(db.session(tid)["status"], ("booked", "booking", "confirmed"))
 
     def test_clear_accept_still_books_directly(self):
         tid = 1710
@@ -361,9 +359,9 @@ class TestSendingDocs(unittest.TestCase):
         self.assertIn(db.session(tid)["status"], ("booked", "booking", "confirmed"))
 
     def test_decline_on_awaiting_docs_is_lost(self):
+        """A session already waiting for documents (older code path) still closes as lost on a decline."""
         tid = 1720
         quote(tid, portal=True)
-        answer(tid, 1, "We will send the dangerous goods documents shortly.")
-        self.assertEqual(db.session(tid)["status"], "awaiting_docs")
+        db.update_session(tid, status="awaiting_docs")
         answer(tid, 2, "On second thought, we will not go ahead. Thanks anyway.")
         self.assertEqual(db.session(tid)["status"], "lost")
