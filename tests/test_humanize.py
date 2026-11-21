@@ -113,3 +113,19 @@ class ReviewFindings(unittest.TestCase):
                                          "Arrival airport: JFK. Ready 2026-11-25.\n\nBest\nTom")[1], [])
         self.assertEqual(humanize.polish(r, {"destination": "JFK"}, {"transit_days": 3},
                                          "It must arrive by 2026-12-01 because pickup is slow. When will it arrive?\n\nBest\nTom")[1], [])
+
+
+class Placement(unittest.TestCase):
+    def test_sentence_goes_after_the_price_not_after_the_goodbye(self):
+        from humanize.polish import _insert_before_signoff
+        body = ("Hi Petra,\n\nAll good here. The fastest option is 4981.34 EUR all-in, about 3 days.\n\n"
+                "Just say the word and I'll get it booked.\n\nHave a lovely day too!")
+        out = _insert_before_signoff(body, "ARRIVAL.")
+        self.assertLess(out.index("4981.34"), out.index("ARRIVAL."))
+        self.assertLess(out.index("ARRIVAL."), out.index("Just say the word"))
+        self.assertTrue(out.rstrip().endswith("Have a lovely day too!"))
+
+    def test_price_last_paragraph_falls_back(self):
+        from humanize.polish import _insert_before_signoff
+        out = _insert_before_signoff("Hi,\n\nTotal 100.00 EUR.\n\nBest regards", "X.")
+        self.assertLess(out.index("X."), out.index("Best regards"))

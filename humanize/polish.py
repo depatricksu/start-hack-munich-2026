@@ -134,6 +134,14 @@ def _sentences(body, fields, best, mail, lang):
 def _insert_before_signoff(body, sentence):
     """Put the sentence before the closing line ('Best regards', 'Best,', 'Viele Grüße') if one of the last 6 lines is
     a short closing; else before a short signature block; else at the end. Never above the price paragraph."""
+    # First choice: right after the paragraph with the price. The signature is added AFTER polish, so the body often
+    # ends with "Just say the word..." + "Have a lovely day too!" and a sentence put at the end reads after the
+    # goodbye (request 11075, 12870). After the price it reads: price -> arrival -> call to action -> goodbye.
+    paras = re.split(r"\n\s*\n", body.strip())
+    price_at = [i for i, p in enumerate(paras) if re.search(r"\d[\d.,]*\s*(?:EUR|USD|€)", p)]
+    if price_at and price_at[-1] < len(paras) - 1:
+        i = price_at[-1]
+        return "\n\n".join(paras[:i + 1] + [sentence] + paras[i + 1:])
     lines = body.rstrip().split("\n")
     for i in range(len(lines) - 1, max(-1, len(lines) - 7), -1):
         l = lines[i].strip()
