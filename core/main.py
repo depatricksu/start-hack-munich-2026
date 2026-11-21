@@ -94,6 +94,15 @@ def price_and_quote(tid, mail, fields, asked=False):
     finalize(tid)
 
 
+def quote_in_eur(best):
+    """Customers ask for an all-in price in EUR. A portal option may come in USD: quote its EUR value, keep the original.
+    Turn off with QUOTE_EUR=0."""
+    if not config.QUOTE_EUR or best.get("currency", "EUR") == "EUR" or not best.get("total_eur"):
+        return best
+    return dict(best, original_total=best["total"], original_currency=best["currency"],
+                total=str(Decimal(best["total_eur"]).quantize(Decimal("0.01"))), currency="EUR")
+
+
 def finalize(tid):
     """Pick the best option and send the one quote. Called right away, or when the bid wait is over."""
     s = db.session(tid)
@@ -105,6 +114,7 @@ def finalize(tid):
         best = min(options, key=lambda x: (x["transit_days"], Decimal(x["total_eur"])))
     else:
         best = min(options, key=lambda x: Decimal(x["total_eur"]))
+    best = quote_in_eur(best)
     if not db.claim_for_sending(tid):                        # someone already quoted this thread
         return db.event("quote_skipped_already_sent", tid)
 
