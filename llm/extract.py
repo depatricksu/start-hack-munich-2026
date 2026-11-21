@@ -29,6 +29,7 @@ SYSTEM = """You work at an air freight forwarder in Germany. Read the customer's
  "reply": the reply email body
 }
 Do not calculate anything. Copy numbers as written (convert units to cm and kg only).
+Several "lots" or pieces that the customer wants ONE combined all-in price for, as a single consignment, are ONE shipment: add their weights and volumes into weight_kg/volume_cbm (or list them in pieces), multi_shipment stays false. multi_shipment is only true when the customer wants separate quotes for different origin/destination routes.
 The reply: write it in the language of the customer's email, never any other (an English email gets an English reply, a German email a German reply). Greet with the name exactly as the customer signed (for example "Hi Anna" or "Guten Tag K. Weber"); never add Frau, Herr, Mr or Ms; no name -> "Hello" / "Guten Tag".
 Write like an experienced, friendly forwarder answering between two calls: plain words, no lists, no headings.
 Mirror the customer: if they wrote one or two lines, answer in two or three sentences; if they wrote a long mail, at most five.
@@ -286,6 +287,29 @@ def _clip(body, head=3000, tail=3000):
     return body if len(body) <= head + tail else body[:head] + "\n[...]\n" + body[-tail:]
 
 
+def _call_and_parse(messages, max_tokens):
+    """One gateway call. Returns (fields or None, raw response). None means the JSON could not be parsed
+    (for example truncated because max_tokens was too small for a long reply)."""
+    status, data = mailbox.api("POST", "/v1/gateway/chat/completions", timeout=45, body={
+        "model": config.LLM_MODEL, "max_completion_tokens": max_tokens, "response_format": {"type": "json_object"},
+        "messages": messages,
+    })
+    if status != 200:
+        raise RuntimeError("gateway %s: %s" % (status, str(data)[:300]))
+    try:
+        return json.loads(data["choices"][0]["message"]["content"]), data
+    except (KeyError, ValueError, json.JSONDecodeError):
+        return None, data
+
+
+def _merge_usage(first, second):
+    """Add the two calls' token usage so the cost we log is the real total."""
+    u1, u2 = (first.get("usage") or {}), (second.get("usage") or {})
+    merged = dict(second)
+    merged["usage"] = {k: (u1.get(k) or 0) + (u2.get(k) or 0) for k in set(u1) | set(u2)}
+    return merged
+
+
 def extract(mail):
     """Returns (fields dict, usage dict). Exactly one gateway call."""
     detected = langmod.detect(_text(mail))                  # counted in code, no call
@@ -293,16 +317,14 @@ def extract(mail):
         return _annotate(_fake(mail), mail, detected), {"fake": True}
     hint = langmod.hint(detected)
     user = "Subject: %s\n\n%s" % (mail["subject"], _clip(mail["body"]))
-    status, data = mailbox.api("POST", "/v1/gateway/chat/completions", timeout=45, body={
-        "model": config.LLM_MODEL,
-        "max_completion_tokens": config.LLM_MAX_TOKENS,
-        "response_format": {"type": "json_object"},
-        "messages": [{"role": "system", "content": SYSTEM},
-                     {"role": "user", "content": user + ("\n\n[%s]" % hint if hint else "")}],
-    })
-    if status != 200:
-        raise RuntimeError("gateway %s: %s" % (status, str(data)[:300]))
-    fields = json.loads(data["choices"][0]["message"]["content"])
+    messages = [{"role": "system", "content": SYSTEM},
+                {"role": "user", "content": user + ("\n\n[%s]" % hint if hint else "")}]
+    fields, data = _call_and_parse(messages, config.LLM_MAX_TOKENS)
+    if fields is None:                                   # truncated/invalid JSON: retry once with more room (rare; logged)
+        fields, data2 = _call_and_parse(messages, config.LLM_MAX_TOKENS * 2)
+        if fields is None:
+            raise RuntimeError("gateway returned unparsable JSON twice: %s" % str(data2)[:300])
+        data = _merge_usage(data, data2)
     _fill_places(fields, mail)
     _annotate(fields, mail, detected)
     fields["reply"], fields["reply_ok"] = safe_reply(fields.get("reply"), fields.get("language"),

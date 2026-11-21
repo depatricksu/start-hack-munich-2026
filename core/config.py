@@ -26,7 +26,7 @@ DRY_RUN = os.environ.get("DRY_RUN", "1") != "0"
 # To test the real prompt on your machine: DRY_RUN=1 LLM_FAKE=0.
 LLM_FAKE = os.environ.get("LLM_FAKE", "1" if DRY_RUN else "0") == "1"
 LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4o-mini")   # check GET /v1/gateway/models for a cheaper one
-LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "400"))
+LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "700"))   # 400 truncated the JSON on a 2-lot mail (live crash 21 Nov 16:46)
 
 DB_PATH = os.environ.get("DB_PATH", os.path.join(ROOT, "data", "forwarder.db"))
 POLL_S = float(os.environ.get("POLL_S", "1.5"))
