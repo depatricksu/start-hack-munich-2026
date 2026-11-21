@@ -40,7 +40,7 @@ class TestTracking(unittest.TestCase):
         self.assertEqual(len(out), 1)
         body = out[0]["body"]
         self.assertEqual(out[0]["to"], TRACKER)
-        for s in ("BK-7F3K2Q9A", "STR to MEL", "Yellowtail Air Freight", "confirmed", "expected arrival"):
+        for s in ("BK-7F3K2Q9A", "STR to MEL", "Yellowtail Air Freight", "confirmed", "Expected arrival"):
             self.assertIn(s, body)
 
     def test_by_team_reference(self):
@@ -61,7 +61,24 @@ class TestTracking(unittest.TestCase):
 
     def test_unknown_never_invents(self):
         body = ask(206, "Where is BK-ZZZZ9999?")[0]["body"]
-        self.assertIn("could not match", body)
+        self.assertIn("couldn't match", body)
+
+
+    def test_by_thread_of_our_booking_mail(self):
+        crm.upsert(105, customer="lea@x.mail", origin="HAM", destination="MEX", airline="Elbflug Air Freight",
+                   weight_kg=300, transit_days=3, status="booked", booking_reference="BK-CCCC3333", booked_at=time.time())
+        main.process(main.mailbox.normalize({"id": 207, "from": TRACKER, "subject": "Re: Booking", "body": "Where is it?",
+                                             "references": [105], "in_reply_to": 105}))
+        rows = db.con().execute("SELECT data FROM events WHERE kind='mail_out_dry_run' AND mail_id=207").fetchall()
+        self.assertIn("BK-CCCC3333", json.loads(rows[0]["data"])["body"])
+
+    def test_by_customer_company(self):
+        crm.upsert(106, customer="t.auer@auer-maschinenbau.de", origin="DUS", destination="JFK",
+                   airline="Fjordline Air Cargo", weight_kg=800, transit_days=3, status="booked",
+                   booking_reference="BK-DDDD4444", booked_at=time.time())
+        body = ask(208, "Hello, can you tell us where the shipment of Auer Maschinenbau is?")[0]["body"]
+        self.assertIn("BK-DDDD4444", body)
+        self.assertIn("Düsseldorf to New York", body)
 
 
 if __name__ == "__main__":
