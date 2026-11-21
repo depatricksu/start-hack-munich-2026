@@ -206,6 +206,9 @@ def handle_follow_up(mail):
         return _needs_human(tid, mail["id"], "customer answered the quote, not a clear yes or no")
 
     chosen, fields = json.loads(s["chosen"]), json.loads(s["fields"] or "{}")
+    if chosen.get("parts"):                                    # several shipments (pricing/multi.py): book by hand for now
+        return _needs_human(tid, mail["id"], "multi_shipment accepted: book each part by hand: " + "; ".join(
+            "%s-%s %s %s EUR" % (p["origin"], p["destination"], p["airline"], p["total_eur"]) for p in chosen["parts"]))
     base = dict(customer=s["customer"], subject=s["subject"], last_customer_mail_id=mail["id"],
                 airline=chosen["airline"], airline_code=chosen.get("airline_code"), origin=chosen["origin"],
                 destination=chosen["destination"], weight_kg=fields.get("weight_kg_total"),
