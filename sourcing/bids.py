@@ -24,7 +24,7 @@ REF = re.compile(r"\bBID-(\d+)\b", re.I)
 PRICE = re.compile(r"\d[\d.,]*\s*(?:EUR|USD|CHF|GBP|€|\$)", re.I)
 # A trucker's lead time as the offer files write it. Read by code, because the model took "27 hours from order to
 # collection" for 3 hours on a PDF whose table lost its layout (live, 21 Nov 22:25), and hours decide the balanced pick.
-LEAD = re.compile(r"(\d{1,3})\s*hours?\s+(?:from\s+(?:the\s+)?order|after\s+(?:your\s+)?order)"   # 27 hours from order to collection
+LEAD = re.compile(r"(\d{1,3})\s*hours?\s+(?:from\s+(?:the\s+|your\s+)?order|after\s+(?:the\s+|your\s+)?order)"   # 27 hours from order to collection
                   r"|collection:?\s+in\s+(\d{1,3})\s*hours?"                                    # Collection in 31 hours
                   r"|lead\s*time:?\s+(\d{1,3})\s*hours?", re.I)                                 # Lead time 28 hours
 

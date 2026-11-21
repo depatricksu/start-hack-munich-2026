@@ -71,6 +71,75 @@ def _pdf(data):
         os.unlink(path)
 
 
+# ---------------------------------------------------------------- voice messages (5U, 21 Nov 22:29)
+# "I am on the road today, so I recorded our quotation request as a voice message (voice-message.mp3)". The gateway has
+# no speech model (chat + embeddings only), so the Mac's own speech recognition reads it (dg/stt.swift, ~5 s for a
+# 40 s recording). macOS asks ONCE for permission ("... would like to access Speech Recognition") for the app that
+# started the clerk: until someone clicks Allow the tool fails, the file counts as unreadable and the request goes to
+# a person, exactly as before. Erik: `python3 -m dg.attach --stt <file.mp3>` in the clerk's Terminal shows the prompt.
+AUDIO_EXT = (".mp3", ".m4a", ".wav", ".aac", ".ogg", ".aiff", ".caf", ".flac")
+STT_SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stt.swift")
+STT_PLIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stt.plist")
+STT_TIMEOUT_S = float(os.environ.get("DG_STT_TIMEOUT_S", "20"))
+_STT_OFF_UNTIL = [0.0]   # circuit breaker: after a failure skip speech recognition for 5 minutes, no round waits twice
+STT_LAST = {"error": ""}
+
+
+def stt_binary(report=None):
+    """The compiled speech-to-text tool, data/stt_bin_<hash of the source>. Built once (~2 s). None without swiftc."""
+    import hashlib
+    with open(STT_SRC, "rb") as f, open(STT_PLIST, "rb") as g:
+        tag = hashlib.sha1(f.read() + g.read()).hexdigest()[:8]
+    path = os.environ.get("STT_BIN") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "stt_bin_" + tag)
+    if os.path.exists(path):
+        return path
+    swiftc = shutil.which("swiftc")
+    if not swiftc:
+        if report is not None:
+            report.append("swiftc not found: install Xcode Command Line Tools (xcode-select --install)")
+        return None
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".%d" % os.getpid()
+        r = subprocess.run([swiftc, "-O", STT_SRC, "-o", tmp, "-Xlinker", "-sectcreate", "-Xlinker", "__TEXT",
+                            "-Xlinker", "__info_plist", "-Xlinker", STT_PLIST], capture_output=True, text=True, timeout=180)
+        if r.returncode == 0:
+            os.replace(tmp, path)
+            return path
+        if report is not None:
+            report.append("swiftc failed: " + (r.stderr or r.stdout)[-600:])
+    except Exception as e:
+        if report is not None:
+            report.append("swiftc error: %r" % e)
+    return None
+
+
+def transcribe(data, suffix=".mp3", locale="en-US"):
+    """A voice message as text. "" when not possible (no Mac, no permission, timeout). Never raises."""
+    if time.time() < _STT_OFF_UNTIL[0]:
+        return ""
+    path = None
+    try:
+        binary = stt_binary()
+        if not binary:
+            raise RuntimeError("no speech tool (swiftc missing)")
+        with tempfile.NamedTemporaryFile(suffix=suffix or ".mp3", delete=False) as f:
+            f.write(data)
+            path = f.name
+        r = subprocess.run([binary, path, locale], capture_output=True, text=True, timeout=STT_TIMEOUT_S)
+        if r.returncode != 0 or not r.stdout.strip():
+            raise RuntimeError("speech tool exit %s: %s" % (r.returncode, (r.stdout or r.stderr).strip()[:200]))
+        STT_LAST["error"] = ""
+        return r.stdout.strip()
+    except Exception as e:
+        STT_LAST["error"] = str(e)[:300]
+        _STT_OFF_UNTIL[0] = time.time() + 300
+        return ""
+    finally:
+        if path and os.path.exists(path):
+            os.unlink(path)
+
+
 IMAGE_EXT = (".jpg", ".jpeg", ".png", ".heic", ".tif", ".tiff", ".gif", ".bmp", ".webp")
 OCR_SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ocr.swift")
 OCR_TIMEOUT_S = float(os.environ.get("DG_OCR_TIMEOUT_S", "5"))         # per page, once the worker is warm
@@ -238,6 +307,8 @@ def attachment_text(data, filename=""):
         if name.endswith(".pdf") or data[:5] == b"%PDF-":
             text = _pdf(data)
             return text if len(text.strip()) > 20 else (ocr(data, ".pdf") or text)   # a scanned PDF has no text layer
+        if name.endswith(AUDIO_EXT) or data[:3] == b"ID3":
+            return transcribe(data, os.path.splitext(name)[1] or ".mp3")
         if name.endswith(IMAGE_EXT) or data[:3] == b"\xff\xd8\xff" or data[:8] == b"\x89PNG\r\n\x1a\n":
             return ocr(data, os.path.splitext(name)[1] or ".jpg")
         return data.decode("utf-8", "replace")                 # csv, txt, eml body
@@ -305,4 +376,9 @@ def scan_attachments(files):
 
 if __name__ == "__main__":
     import sys
+    if len(sys.argv) > 2 and sys.argv[1] == "--stt":           # python3 -m dg.attach --stt voice-message.mp3
+        with open(sys.argv[2], "rb") as fh:
+            said = transcribe(fh.read(), os.path.splitext(sys.argv[2])[1])
+        print(said or "NO TEXT: %s" % STT_LAST["error"])
+        sys.exit(0 if said else 1)
     sys.exit(doctor())

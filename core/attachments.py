@@ -10,7 +10,8 @@ A file we cannot read (a photo, a new format) is not an error here: core/alarm.p
 import base64, re
 from . import config, db
 
-KNOWN = {"xlsx", "pdf", "docx", "txt", "csv"}      # types we can turn into text today
+KNOWN = {"xlsx", "pdf", "docx", "txt", "csv",      # types we can turn into text today
+         "mp3", "m4a", "wav"}                      # voice messages: the Mac's speech recognition (dg/attach.transcribe)
 PER_FILE, TOTAL = 1500, 3000                       # characters of attachment text we give the LLM
 
 
