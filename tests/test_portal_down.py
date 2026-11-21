@@ -55,5 +55,21 @@ class TestBidsUsedWhenSheetsExist(unittest.TestCase):
         self.assertEqual(best["airline"], "Meridian Freightways")
 
 
+    def test_cheaper_bid_from_an_airline_we_already_priced_wins(self):
+        """Round 33 (19:15 change): the winners booked Borealis, which we had from the portal at a higher price.
+        The mailed Borealis price must compete with the portal one, not be skipped (Kai's review point 3)."""
+        import random, json, time
+        tid = random.randint(900000, 909999)
+        db.con().execute("INSERT OR REPLACE INTO sessions(thread_id,customer,status,fields,options,received_at) VALUES(?,?,?,?,?,?)",
+                         (tid, "c@x.mail", "waiting_bids", json.dumps({"origin": "FRA", "destination": "ORD", "weight_kg_total": 500, "prefer": "cheapest"}),
+                          json.dumps([{"airline": "Borealis Freight Airways", "total": "2000", "total_eur": "2000", "currency": "EUR", "transit_days": 3, "source": "portal"}]), time.time()))
+        bids.ensure()
+        db.con().execute("INSERT INTO bids(thread_id,carrier,kind,email,role,required,status,requested_at,replied_at,total,currency,transit_days,total_eur) "
+                         "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (tid, "Borealis Freight Airways", "airline", "b@x", "airline", 1, "ok", time.time(), time.time(), "1700", "EUR", 3, "1700"))
+        opts = bids.final_options(tid, json.loads(db.session(tid)["options"]))
+        best = min(opts, key=lambda x: float(x["total_eur"]))
+        self.assertEqual((best["airline"], best["total_eur"], best["source"]), ("Borealis Freight Airways", "1700", "bid"))
+
+
 if __name__ == "__main__":
     unittest.main()
