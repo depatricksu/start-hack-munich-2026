@@ -218,6 +218,34 @@ def _days(x):
         return None
 
 
+# A price this far from the middle of the request's own options is a reading error, not a deal: a per-kg rate read
+# as the total, a thousands separator, a missing exchange rate. Real spread on 21 Nov: 0.51x to 2.43x of the median.
+OUTLIER_LOW = Decimal(os.environ.get("PRICE_OUTLIER_LOW", "0.35"))
+OUTLIER_HIGH = Decimal(os.environ.get("PRICE_OUTLIER_HIGH", "4"))
+
+
+def drop_price_outliers(tid, options):
+    """Options of ONE request, same shipment (the trucker leg is in all of them): drop the absurd ones before we pick.
+    Needs >= 3 priced options, never drops below 2, never stops a quote. Logged as price_outlier_dropped."""
+    def eur(x):
+        try:
+            return Decimal(str(x["total_eur"]))
+        except Exception:
+            return None
+    priced = [(x, eur(x)) for x in options if eur(x) is not None and eur(x) > 0]
+    if len(priced) < 3:
+        return options
+    vals = sorted(v for _, v in priced)
+    n = len(vals)
+    median = vals[n // 2] if n % 2 else (vals[n // 2 - 1] + vals[n // 2]) / 2
+    keep = [x for x, v in priced if OUTLIER_LOW * median <= v <= OUTLIER_HIGH * median]
+    if len(keep) == len(priced) or len(keep) < 2:
+        return options
+    db.event("price_outlier_dropped", tid, median=str(median), kept=len(keep),
+             dropped=[[x.get("airline"), str(v), x.get("source")] for x, v in priced if x not in keep])
+    return keep
+
+
 def by_deadline(tid, options, fields):
     """Keep the options that land in time. None lands in time -> all of them, and the fastest is taken."""
     first = db.con().execute("SELECT body FROM mails WHERE id=?", (tid,)).fetchone()
@@ -236,6 +264,7 @@ def finalize(tid):
     options = bids.final_options(tid, options)               # add bids, add trucker leg
     if not options:
         return needs_human(tid, None, "no price found for this lane")
+    options = drop_price_outliers(tid, options)              # a misread bid (per-kg as total, x1000) never wins
     options, too_late = by_deadline(tid, options, fields)    # "must arrive by <date>": drop flights that land late
     if fields.get("prefer") == "fastest" or too_late:
         best = min(options, key=lambda x: (x["transit_days"], Decimal(x["total_eur"])))

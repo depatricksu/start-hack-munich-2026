@@ -109,5 +109,27 @@ class TestRound2(unittest.TestCase):
         self.assertEqual(classify("Yes, but please send the invoice in USD."), "unclear")
 
 
+class TestPriceOutliers(unittest.TestCase):
+    """A misread bid must never win the quote (core/main.py drop_price_outliers)."""
+    def opts(self, *totals):
+        return [{"airline": "A%d" % i, "total_eur": str(t), "transit_days": 3, "source": "bid"} for i, t in enumerate(totals)]
+
+    def test_per_kg_rate_read_as_total_is_dropped(self):
+        kept = main.drop_price_outliers(1, self.opts(2.85, 2400, 2550, 2610))
+        self.assertEqual(sorted(x["total_eur"] for x in kept), ["2400", "2550", "2610"])
+
+    def test_thousand_times_too_high_is_dropped(self):
+        kept = main.drop_price_outliers(1, self.opts(2400, 2550, 2610000))
+        self.assertEqual(len(kept), 2)
+
+    def test_real_spread_is_kept(self):           # 3630 on 21 Nov: cheapest 0.51x the median, accepted
+        o = self.opts(1000, 1800, 1960, 2000, 2400, 3600)
+        self.assertEqual(main.drop_price_outliers(1, o), o)
+
+    def test_too_few_options_untouched(self):
+        o = self.opts(3, 2400)
+        self.assertEqual(main.drop_price_outliers(1, o), o)
+
+
 if __name__ == "__main__":
     unittest.main()
