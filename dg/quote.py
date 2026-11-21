@@ -62,20 +62,21 @@ def describe(info):
 
 PARAGRAPH = {
     "en": ("One thing to note: your shipping documents declare dangerous goods ({what}). We can fly this as "
-           "dangerous goods; to confirm the booking we need the Shipper's Declaration for Dangerous Goods and the "
-           "safety data sheet (MSDS) for this shipment."),
+           "dangerous goods. Could you please send us the dangerous goods documents: the Shipper's Declaration for "
+           "Dangerous Goods and the safety data sheet (MSDS)? We need them to confirm the booking."),
     "de": ("Ein Hinweis: Laut Ihren Versandunterlagen handelt es sich um Gefahrgut ({what}). Wir können die Sendung "
-           "als Gefahrgut befördern; für die Buchung benötigen wir die Shipper's Declaration for Dangerous Goods und "
-           "das Sicherheitsdatenblatt (MSDS)."),
+           "als Gefahrgut befördern. Könnten Sie uns bitte die Gefahrgutdokumente senden: die Shipper's Declaration "
+           "for Dangerous Goods und das Sicherheitsdatenblatt (MSDS)? Wir benötigen sie für die Buchung."),
     "it": ("Una nota: i documenti di spedizione dichiarano merce pericolosa ({what}). Possiamo trasportarla come "
-           "merce pericolosa; per confermare la prenotazione ci servono la Shipper's Declaration for Dangerous Goods "
-           "e la scheda di sicurezza (MSDS)."),
+           "merce pericolosa. Potrebbe inviarci i documenti per merci pericolose: la Shipper's Declaration for "
+           "Dangerous Goods e la scheda di sicurezza (MSDS)? Ci servono per confermare la prenotazione."),
     "fr": ("Une remarque : vos documents d'expédition déclarent des marchandises dangereuses ({what}). Nous pouvons "
-           "les transporter en tant que telles ; pour confirmer la réservation, il nous faut la Shipper's Declaration "
-           "for Dangerous Goods et la fiche de données de sécurité (MSDS)."),
+           "les transporter en tant que telles. Pourriez-vous nous envoyer les documents marchandises dangereuses : la "
+           "Shipper's Declaration for Dangerous Goods et la fiche de données de sécurité (MSDS) ? Nous en avons besoin "
+           "pour confirmer la réservation."),
     "es": ("Una nota: sus documentos de envío declaran mercancía peligrosa ({what}). Podemos transportarla como "
-           "mercancía peligrosa; para confirmar la reserva necesitamos la Shipper's Declaration for Dangerous Goods "
-           "y la hoja de datos de seguridad (MSDS)."),
+           "mercancía peligrosa. ¿Podría enviarnos los documentos de mercancía peligrosa: la Shipper's Declaration for "
+           "Dangerous Goods y la hoja de datos de seguridad (MSDS)? Los necesitamos para confirmar la reserva."),
 }
 
 
