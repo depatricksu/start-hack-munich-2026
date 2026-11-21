@@ -124,8 +124,21 @@ class BookingAndTracking(unittest.TestCase):
          "SLOTS": "Mon 10:00", "FORWARDER": "Jonas", "ALT_AIRLINE": "Isar Air", "ALT_PRICE": "850.00 EUR", "ALT_TRANSIT": 5, "NEW_PRICE": "990.00 EUR"}
 
     def test_booking_mails_language_signature_and_tone(self):
+        import re
+        ph = lambda texts: set().union(*(re.findall(r"\{[A-Z_]+\}", t) for t in texts))
         for kind in replies.BODY:
-            for lg in ("en", "de"):
+            for lg in ("en", "de", "it", "fr", "es"):
+                self.assertIn(lg, replies.BODY[kind], (kind, lg))     # really used, not the English fallback
+                self.assertIn(lg, replies.CLOSE[kind], (kind, lg))
+                self.assertTrue(lg in replies.GREET and lg in replies.SIGN, lg)
+                for part in (replies.BODY, replies.CLOSE):            # same placeholders as the English texts
+                    en = ph(part[kind]["en"])
+                    self.assertEqual(ph(part[kind][lg]), en, (kind, lg))
+                    for t in part[kind][lg]:
+                        self.assertLessEqual(ph([t]), en, t)
+                        if lg not in ("en", "de"):
+                            self.assertIsNone(re.search(r"\d", t), t)  # never a digit of a price in the text
+                self.assertEqual(replies.combos(kind, lg)[0], lg)
                 for tid in range(8):
                     text = replies.render(kind, lg, self.V, thread_id=tid, customer="deniz.yilmaz@x.mail")[0]
                     self.assertNotIn("{", text)
