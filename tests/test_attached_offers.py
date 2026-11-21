@@ -94,6 +94,15 @@ class OfferInTheFile(unittest.TestCase):
         self.assertIsNone(bids.lead_hours("We deliver in 2 days."))
         self.assertEqual(bids.lead_hours(VOICE_OFFER), 12)                    # a trucker's voice message, as transcribed
 
+    def test_spoken_numbers_in_a_voice_offer(self):
+        """Live 22:55, three of four truckers answered by voice. 'seven hours' came back with no lead time at all."""
+        self.assertEqual(bids.lead_hours("the total is €379.68 waiting time after the first 30 minutes is €45 for each hour and "
+                                         "that is not part of the total we need seven hours from your order to the collection"), 7)
+        self.assertEqual(bids.lead_hours("that is all in the driver can be there four hours after your order I keep the price"), 4)
+        self.assertEqual(bids.lead_hours("we need twenty four hours from your order to the collection"), 24)
+        self.assertEqual(bids.lead_hours("we need thirty-two hours from your order to the collection"), 32)
+        self.assertEqual(bids.spoken_hours("€45 for each hour, one piece, seven pallets"), "€45 for each hour, one piece, seven pallets")
+
     def test_the_reader_gets_the_file_text(self):
         mail = {"subject": "Re: Pickup 20103 to HAM airport, 827 kg [BID-405]", "body": "You find our price offer in the attachment.",
                 "attachments_text": [f("price-offer-TRK-5967.pdf", ELBKANTE)]}
