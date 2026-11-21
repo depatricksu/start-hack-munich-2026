@@ -73,3 +73,23 @@ class TestBidsUsedWhenSheetsExist(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestExcludedAirline(unittest.TestCase):
+    """Round 42 (20:09): 'Please do not offer Zephyr Steppe Cargo (ZS)'. On a lane priced by bids only, the pick must
+    skip the excluded airline and take the next one, not pick it and end with no option."""
+    def test_excluded_airline_is_never_picked_on_a_bid_only_lane(self):
+        import random, json, time
+        tid, cust = random.randint(910000, 919999), "meyer%d@x.mail" % random.randint(1, 10**6)
+        db.con().execute("INSERT INTO mails(id,thread_id,sender,subject,body,received_at) VALUES(?,?,?,?,?,?)",
+                         (tid, tid, cust, "Quote to ULN", "Cheapest option to ULN please.\n\nPlease do not offer Zephyr Steppe Cargo (ZS) "
+                          "for this shipment or for any of our future inquiries.\n\nBest regards", time.time()))
+        db.con().execute("INSERT OR REPLACE INTO sessions(thread_id,customer,status,fields,options,received_at) VALUES(?,?,?,?,?,?)",
+                         (tid, cust, "waiting_bids", json.dumps({"origin": "FRA", "destination": "ULN", "weight_kg_total": 911, "prefer": "cheapest"}), "[]", time.time()))
+        bids.ensure()
+        for name, total in (("Zephyr Steppe Cargo", "1000"), ("Lagoon Isles Airways", "3210"), ("Pampero Air Cargo", "3780")):
+            db.con().execute("INSERT INTO bids(thread_id,carrier,kind,email,role,required,status,requested_at,replied_at,total,currency,transit_days,hours,total_eur) "
+                             "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (tid, name, "airline", "b@x", "airline", 1, "ok", time.time(), time.time(), total, "EUR", 3, 72, total))
+        opts = bids.final_options(tid, [])
+        self.assertNotIn("Zephyr Steppe Cargo", [x["airline"] for x in opts])
+        self.assertEqual(min(opts, key=lambda x: float(x["total_eur"]))["airline"], "Lagoon Isles Airways")
