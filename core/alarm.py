@@ -10,6 +10,7 @@ agent chat (GitHub issue #2), with the customer's mail, what the LLM read, the p
   rejected       5U rejected our quote, or we got no answer in (needs `python3 -m monitor.board` running)
   low_score      accepted, but fewer points than a clean quote
   clerk_silent   the clerk has not polled the mailbox for 45 s
+  odd_attachment a customer sent a file we cannot read or have never seen (photo, new format)
 So all four agents see the problem within minutes, without asking the runner's human for data.
 """
 import json, shutil, subprocess, sys, threading, time
@@ -83,6 +84,14 @@ def find():
                             tid, age, s["status"], time.strftime("%H:%M:%S", time.localtime(s["received_at"] + 360)))))
         if s["status"] in ("needs_human", "failed"):
             out.append(("human-%s" % tid, "needs_human", tid, "request %s went to `%s`: %s" % (tid, s["status"], s["note"])))
+    for e in c.execute("SELECT thread_id, mail_id, data FROM events WHERE kind='attachments' AND ts > ?", (now - 3600,)):
+        odd = [f for f in json.loads(e["data"]).get("files", []) if not f.get("readable") or not f.get("known_type")]
+        if odd:
+            out.append(("att-%s" % e["mail_id"], "odd_attachment", e["thread_id"],
+                        "a customer file we could not read or have never seen: " + "; ".join(
+                            "%s (%s bytes, %s)" % (f["filename"], f["bytes"], "not downloaded" if not f.get("downloaded")
+                                                   else "no text found" if not f.get("readable") else "new type")
+                            for f in odd) + ". 5U may have hidden something in it: open it by hand."))
     tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if "board_results" in tables:
         for b in c.execute("SELECT * FROM board_results WHERE updated_at > ?", (now - 3600,)):

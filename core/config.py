@@ -51,6 +51,9 @@ QUOTE_EUR = os.environ.get("QUOTE_EUR", "1") == "1"        # quote in EUR even i
 BID_PICK = os.environ.get("BID_PICK", "balanced").lower()
 # The supervisor uploads a snapshot of the live DB for the team this often (core/share.py). 0 = never.
 SHARE_EVERY_S = float(os.environ.get("SHARE_EVERY_S", "900"))
+# 1 = the gateway call also gets the text of the customer's attachments (core/attachments.py). Off until one real
+# request with an attachment was tried with the real gateway in DRY_RUN: it changes what the model reads.
+ATTACH_LLM = os.environ.get("ATTACH_LLM", "0") == "1"
 # An RFQ older than this is dead (expires after 6 min). We do not answer it, e.g. after a restart.
 RFQ_MAX_AGE_S = float(os.environ.get("RFQ_MAX_AGE_S", "330"))
 CLARIFY = os.environ.get("CLARIFY", "1") == "1"     # ask the customer when only data is missing (Erik, 21 Nov)

@@ -382,6 +382,26 @@ def _weight_traps(r: "RFQ", text: str) -> list[str]:
     return out
 
 
+_DG_DENIAL = re.compile(r"non[- ]?dangerous|non[- ]?hazardous|not? (?:a )?dangerous|no dangerous goods|not hazardous|"
+                        r"kein(?:e)? gefahrgut|nicht gef[aä]hrlich|ungef[aä]hrlich|dangerous goods:\s*no\b", re.I)
+
+
+def _declared_dg(mail: dict):
+    """The model flagged dangerous goods in the MAIL. Is it a real declaration?
+    A UN number / 'Dangerous goods: ...' -> the dict from dg.read_declaration. A plain denial ('non-dangerous',
+    'no dangerous goods') -> None, it is NOT dangerous goods. Anything else the model flagged (lithium batteries,
+    'hazmat') -> True: dg/ adds the documents paragraph without a UN number."""
+    text = (mail.get("subject") or "") + "\n" + (mail.get("body") or "")
+    try:
+        import dg
+        found = dg.read_declaration(text)
+    except Exception:
+        found = None
+    if found:
+        return found
+    return None if _DG_DENIAL.search(text) else True
+
+
 def gate(fields: dict, mail: dict) -> tuple[bool, str]:
     """(ok, note). ok=False -> needs_human with `note`. ok=True -> price it; note lists warnings (may be "").
 
@@ -399,6 +419,11 @@ def gate(fields: dict, mail: dict) -> tuple[bool, str]:
         stop.append("unclear: " + "; ".join(map(str, fields["unclear"]))[:200])
 
     r = from_fields(fields, mail)
+    if r.dangerous_goods or fields.get("dg"):            # DG is no longer a stop: dg/ writes it into the quote
+        fields["dg"] = fields.get("dg") or _declared_dg(mail)
+        r.dangerous_goods = False
+        if fields["dg"]:
+            warn.append("dangerous_goods: declared, quoted with the DG documents paragraph")
     for i in validate(r):
         if i.field in ("message_id", "customer_email"):
             continue                                     # envelope is core's job

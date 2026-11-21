@@ -87,10 +87,25 @@ class TestGate(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("missing: weight_kg", note)
 
-    def test_dangerous_goods_stops(self):
-        ok, note = gate(dict(self.OK, dangerous_goods=True), self.MAIL)
-        self.assertFalse(ok)
+    def test_dangerous_goods_is_quoted_not_stopped(self):
+        """Since 21 Nov 17:00 5U rejects with dg_docs_missing: dg/ writes DG into the quote, the gate no longer stops."""
+        f = dict(self.OK, dangerous_goods=True)
+        ok, note = gate(f, dict(self.MAIL, body=self.MAIL["body"] + " Lithium batteries inside."))
+        self.assertTrue(ok)
         self.assertIn("dangerous_goods", note)
+        self.assertTrue(f["dg"])
+
+    def test_dg_declaration_in_the_mail_is_read(self):
+        f = dict(self.OK, dangerous_goods=True)
+        gate(f, dict(self.MAIL, body=self.MAIL["body"] + " Dangerous goods: UN1133, Class 3, Adhesives"))
+        self.assertEqual(f["dg"]["un"], "UN1133")
+
+    def test_a_denial_is_not_dangerous_goods(self):
+        for text in ("general cargo, non-dangerous", "spray cans, no dangerous goods", "kein Gefahrgut"):
+            f = dict(self.OK, dangerous_goods=True)            # the model flagged the word
+            ok, note = gate(f, dict(self.MAIL, body=self.MAIL["body"] + " " + text))
+            self.assertTrue(ok, text)
+            self.assertFalse(f.get("dg"), text)
 
     def test_mismatch_only_warns(self):
         ok, note = gate(dict(self.OK, weight_kg=900, weight_kg_total=900.0), self.MAIL)

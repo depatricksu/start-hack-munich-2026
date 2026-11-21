@@ -9,7 +9,7 @@ To add a feature, write a handler in your own folder and register it in HANDLERS
 """
 import csv, json, os, re, sys, time, traceback
 from decimal import Decimal
-from . import config, db, mailbox, safety
+from . import attachments, config, db, mailbox, safety
 from router.route import route
 from llm import extract as llm
 from pricing import price as sheets
@@ -60,7 +60,7 @@ def handle_rfq(mail):
         db.update_session(tid, status="expired", note="mail was %d s old when we saw it" % age)
         return db.event("rfq_expired", tid, mail["id"], age_s=round(age))
 
-    fields, usage = llm.extract(mail)                       # the one gateway call
+    fields, usage = llm.extract(attachments.for_llm(mail))  # the one gateway call (+ attachment text if ATTACH_LLM=1)
     db.event("llm", tid, mail["id"], fields=fields, usage=usage)
     fields["dg"] = dg.check_mail(mail)                      # DG declared only in the attachment (5U change ~17:00)
     if fields["dg"]:
@@ -184,6 +184,8 @@ def process(mail):
     r = route(mail, config.OUR_ADDRESS)
     db.set_route(mail["id"], r)
     db.event("mail_in", mail["thread_id"], mail["id"], route=r, sender=mail["sender"], subject=mail["subject"])
+    if r in ("rfq", "follow_up") and mail["attachments"]:
+        attachments.read(mail)                               # every customer file -> text, once (core/attachments.py)
     handler = HANDLERS.get(r)
     if not handler:
         return db.event("no_handler_yet", mail["thread_id"], mail["id"], route=r)
