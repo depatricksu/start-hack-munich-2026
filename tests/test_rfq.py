@@ -1,7 +1,7 @@
 """Run: python -m unittest tests.test_rfq -v"""
 import unittest
 
-from shared.rfq import Level, Mode, Service, can_price, extract_rfq, missing_fields, validate
+from shared.rfq import Level, Mode, Service, can_price, extract_rfq, gate, missing_fields, validate
 
 ENV = dict(message_id="m1", customer_email="buyer@acme.hackloop.mail", received_at="2026-11-21T16:00:00Z")
 
@@ -60,6 +60,46 @@ class TestExtract(unittest.TestCase):
     def test_missing_envelope(self):
         r = extract_rfq("RFQ", "MUC to LAX 100 kg 0.5 cbm cheapest")
         self.assertIn(("message_id", Level.MISSING), levels(validate(r)))
+
+
+class TestGate(unittest.TestCase):
+    MAIL = {"id": 7, "thread_id": 7, "sender": "anna@x.hackloop.mail",
+            "subject": "Quote HAM to BOG", "body": "Please quote 90 kg, 0.4 cbm from HAM to BOG, cheapest."}
+    OK = {"origin": "HAM", "destination": "BOG", "weight_kg": 90, "volume_cbm": 0.4, "prefer": "cheapest",
+          "kind": "new_request", "weight_kg_total": 90.0, "volume_cbm_total": 0.4}
+
+    def test_clean_request_passes(self):
+        self.assertEqual(gate(self.OK, self.MAIL), (True, ""))
+
+    def test_not_a_request(self):
+        ok, note = gate(dict(self.OK, kind="question"), self.MAIL)
+        self.assertFalse(ok)
+        self.assertIn("not_a_request", note)
+
+    def test_multi_shipment(self):
+        ok, note = gate(dict(self.OK, multi_shipment=True), self.MAIL)
+        self.assertFalse(ok)
+        self.assertIn("multi_shipment", note)
+
+    def test_missing_weight_stops(self):
+        f = dict(self.OK, weight_kg=None, weight_kg_total=0)
+        ok, note = gate(f, self.MAIL)
+        self.assertFalse(ok)
+        self.assertIn("missing: weight_kg", note)
+
+    def test_dangerous_goods_stops(self):
+        ok, note = gate(dict(self.OK, dangerous_goods=True), self.MAIL)
+        self.assertFalse(ok)
+        self.assertIn("dangerous_goods", note)
+
+    def test_mismatch_only_warns(self):
+        ok, note = gate(dict(self.OK, weight_kg=900, weight_kg_total=900.0), self.MAIL)
+        self.assertTrue(ok)
+        self.assertIn("llm_regex_mismatch", note)
+
+    def test_old_form_without_kind_still_passes(self):
+        f = {k: v for k, v in self.OK.items() if k != "kind"}
+        self.assertTrue(gate(f, self.MAIL)[0])
 
 
 if __name__ == "__main__":

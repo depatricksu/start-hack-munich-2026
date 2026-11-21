@@ -16,6 +16,10 @@ SYSTEM = """You work at an air freight forwarder in Germany. Read the customer's
  "volume_cbm": total volume in cubic meters if stated directly, else null,
  "pieces": [{"count": n, "l_cm": n, "w_cm": n, "h_cm": n, "kg_each": n or null}] if dimensions are given, else [],
  "prefer": "fastest" if the customer asks for the fastest/most urgent option, else "cheapest",
+ "kind": "new_request" if the customer asks for a price for a shipment, "accept" if they accept an offer, "question" if they only ask something, else "other",
+ "multi_shipment": true if the email asks prices for more than one separate shipment (different routes or separate consignments), else false,
+ "dangerous_goods": true if dangerous goods, hazmat, DGR, UN numbers or lithium batteries are mentioned, else false,
+ "currency": currency code if the customer asks for a specific currency, else null,
  "language": ISO 639-1 code of the language the customer wrote in ("en", "de", ...),
  "missing": list of fields you could not find,
  "reply": the reply email body
@@ -64,4 +68,6 @@ def _fake(mail):
             "pickup_postcode": None, "weight_kg": float(kg.group(1)) if kg else None,
             "volume_cbm": float(cbm.group(1)) if cbm else None, "pieces": [],
             "prefer": "fastest" if re.search(r"fastest|urgent|schnell", text, re.I) else "cheapest",
-            "missing": [], "reply": FALLBACK_REPLY}
+            "kind": "new_request", "multi_shipment": False,
+            "dangerous_goods": bool(re.search(r"dangerous|hazmat|dgr|lithium|UN ?\d{4}", text, re.I)),
+            "currency": None, "missing": [], "reply": FALLBACK_REPLY}

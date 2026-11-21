@@ -293,3 +293,71 @@ def missing_fields(issues: list[Issue]) -> list[str]:
 
 def can_price(issues: list[Issue]) -> bool:
     return not any(i.level in (Level.MISSING, Level.HUMAN) for i in issues)
+
+
+# --------------------------------------------------------------------------
+# Gate for core/main.py handle_rfq: LLM fields in, go / no-go + reason codes out
+# --------------------------------------------------------------------------
+KINDS = ("new_request", "accept", "question", "other")
+
+
+def from_fields(fields: dict, mail: dict) -> RFQ:
+    """Turn the LLM form (llm/extract.py) into an RFQ. Uses the totals core already computed."""
+    prefer = (fields.get("prefer") or "").lower()
+    postcode = str(fields.get("pickup_postcode") or "").strip() or None
+    r = RFQ(
+        message_id=str(mail.get("id") or "") or None,
+        thread_id=str(mail.get("thread_id") or "") or None,
+        customer_email=mail.get("sender"),
+        origin=(fields.get("origin") or "").upper() or None,
+        destination=(fields.get("destination") or "").upper() or None,
+        weight_kg=fields.get("weight_kg_total") or fields.get("weight_kg") or None,
+        volume_cbm=fields.get("volume_cbm_total") or fields.get("volume_cbm") or None,
+        mode=Mode.FASTEST if prefer == "fastest" else Mode.CHEAPEST if prefer == "cheapest" else None,
+        service=Service.DOOR_TO_PORT if postcode else Service.AIRPORT_TO_AIRPORT,
+        pickup_postcode=postcode,
+        dangerous_goods=bool(fields.get("dangerous_goods")),
+        currency_requested=(fields.get("currency") or None),
+        language=fields.get("language"),
+    )
+    return normalize(r)
+
+
+def _cross_check(llm: RFQ, rx: RFQ) -> list[str]:
+    """Free second reader. Disagreement is a warning, not a stop: a stop scores 0 for sure."""
+    out = []
+    if llm.destination and rx.destination and llm.destination != rx.destination:
+        out.append(f"llm_regex_mismatch: destination {llm.destination} vs {rx.destination}")
+    if llm.weight_kg and rx.weight_kg and abs(llm.weight_kg - rx.weight_kg) > 0.05 * llm.weight_kg:
+        out.append(f"llm_regex_mismatch: weight {llm.weight_kg} vs {rx.weight_kg} kg")
+    return out
+
+
+def gate(fields: dict, mail: dict) -> tuple[bool, str]:
+    """(ok, note). ok=False -> needs_human with `note`. ok=True -> price it; note lists warnings (may be "").
+
+    Reason codes, first word of each part of the note (the UI shows them):
+      not_a_request, multi_shipment, unclear, missing, dangerous_goods, origin, destination,
+      pickup_postcode, llm_regex_mismatch, volume_cbm, mode, currency_requested
+    """
+    stop, warn = [], []
+    kind = (fields.get("kind") or "new_request").lower()
+    if kind not in ("new_request",):
+        stop.append(f"not_a_request: kind={kind}")
+    if fields.get("multi_shipment") or len(fields.get("shipments") or []) > 1:
+        stop.append("multi_shipment: several shipments in one mail")
+    if fields.get("unclear"):
+        stop.append("unclear: " + "; ".join(map(str, fields["unclear"]))[:200])
+
+    r = from_fields(fields, mail)
+    for i in validate(r):
+        if i.field in ("message_id", "customer_email"):
+            continue                                     # envelope is core's job
+        if i.level == Level.MISSING:
+            stop.append(f"missing: {i.field}")
+        elif i.level == Level.HUMAN:
+            stop.append(f"{i.field}: {i.message}")
+        else:
+            warn.append(f"{i.field}: {i.message}")
+    warn += _cross_check(r, extract_rfq(mail.get("subject") or "", mail.get("body") or ""))
+    return (not stop), " | ".join(stop + warn)

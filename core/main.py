@@ -14,6 +14,7 @@ from router.route import route
 from llm import extract as llm
 from pricing import price as sheets
 from sourcing import portal
+from shared.rfq import gate as rfq_gate
 
 try:                       # sourcing/bids.py does not exist yet. See CLAUDE.md "How to plug in".
     from sourcing import bids
@@ -50,6 +51,13 @@ def handle_rfq(mail):
     weight, volume = shipment(fields)
     fields["weight_kg_total"], fields["volume_cbm_total"] = weight, volume
     db.update_session(tid, fields=fields, reply_template=fields.get("reply") or "", llm_cost_usd=usage.get("cost_usd"))
+
+    ok, note = rfq_gate(fields, mail)                       # shared/rfq.py (Patrick): stop or warn, with reason codes
+    db.event("gate", tid, mail["id"], ok=ok, note=note)
+    if not ok:
+        return needs_human(tid, mail, note)
+    if note:
+        db.update_session(tid, note=note)                    # warnings only, we still quote
 
     if not (fields.get("origin") and fields.get("destination") and weight > 0):
         return needs_human(tid, mail, "could not read origin, destination or weight")
