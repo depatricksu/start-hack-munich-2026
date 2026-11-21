@@ -99,6 +99,8 @@ def quote_in_eur(best):
     Turn off with QUOTE_EUR=0."""
     if not config.QUOTE_EUR or best.get("currency", "EUR") == "EUR" or not best.get("total_eur"):
         return best
+    if best.get("fx_missing"):                               # no exchange rate came with the price: total_eur is NOT in EUR
+        return best                                          # quote the original number in the original currency
     return dict(best, original_total=best["total"], original_currency=best["currency"],
                 total=str(Decimal(best["total_eur"]).quantize(Decimal("0.01"))), currency="EUR")
 

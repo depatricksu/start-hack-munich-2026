@@ -154,5 +154,37 @@ class TestBids(unittest.TestCase):
         self.assertEqual([b for b in bids.rows(771006) if b["id"] == a["id"]][0]["status"], "no_fx")
 
 
+class TestPortalCurrency(unittest.TestCase):
+    """A non-EUR portal price without an exchange rate must never be relabelled as EUR."""
+
+    def _rate(self, reply):
+        from sourcing import portal
+        old = portal.mailbox.api
+        portal.mailbox.api = lambda *a, **k: (200, reply)
+        try:
+            return portal._rate("FRA", "JFK", "LM", 100, 0.5)
+        finally:
+            portal.mailbox.api = old
+
+    BASE = {"airline": "Lumen Air Cargo", "transit_days": 3, "total": "1000.00", "rate_id": "R-12345678"}
+
+    def test_usd_with_rate_is_converted(self):
+        o = self._rate(dict(self.BASE, currency="USD", fx_eur_per_usd="0.92"))
+        self.assertEqual(o["total_eur"], "920.00")
+        self.assertEqual(main.quote_in_eur(o)["total"], "920.00")
+        self.assertEqual(main.quote_in_eur(o)["currency"], "EUR")
+
+    def test_usd_without_rate_stays_usd(self):
+        o = self._rate(dict(self.BASE, currency="USD"))
+        self.assertTrue(o["fx_missing"])
+        q = main.quote_in_eur(o)
+        self.assertEqual((q["total"], q["currency"]), ("1000.00", "USD"))
+
+    def test_eur_is_untouched(self):
+        o = self._rate(dict(self.BASE, currency="EUR"))
+        self.assertNotIn("fx_missing", o)
+        self.assertEqual(main.quote_in_eur(o)["total"], "1000.00")
+
+
 if __name__ == "__main__":
     unittest.main()

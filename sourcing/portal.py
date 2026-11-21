@@ -72,12 +72,19 @@ def _rate(origin, destination, code, weight_kg, volume_cbm):
         return "limit"
     if status != 200:
         return None
-    fx = Decimal(r.get("fx_eur_per_usd") or "1")
-    return {"airline": r["airline"], "airline_code": r.get("airline_code") or code, "origin": origin,
-            "destination": destination, "transit_days": r["transit_days"], "currency": r["currency"],
-            "total": r["total"], "total_eur": str((Decimal(r["total"]) * fx).quantize(Decimal("0.01"))),
-            "chargeable_kg": r.get("chargeable_weight_kg"), "billed_kg": str(weight_kg), "source": "portal",
-            "rate_id": r["rate_id"], "valid_until": r.get("valid_until")}
+    stated = r.get("fx_eur_per_usd")                 # EUR per 1 unit of the price's currency, only for non-EUR prices
+    fx_missing = r["currency"] != "EUR" and not stated
+    if fx_missing:                                   # we cannot turn it into EUR: never relabel the number as EUR
+        _log("portal_no_fx", airline=r["airline"], currency=r["currency"], total=r["total"])
+    fx = Decimal(stated or "1")
+    opt = {"airline": r["airline"], "airline_code": r.get("airline_code") or code, "origin": origin,
+           "destination": destination, "transit_days": r["transit_days"], "currency": r["currency"],
+           "total": r["total"], "total_eur": str((Decimal(r["total"]) * fx).quantize(Decimal("0.01"))),
+           "chargeable_kg": r.get("chargeable_weight_kg"), "billed_kg": str(weight_kg), "source": "portal",
+           "rate_id": r["rate_id"], "valid_until": r.get("valid_until"), "fx": stated}
+    if fx_missing:
+        opt["fx_missing"] = True                     # ranked by its raw number, quoted in its own currency
+    return opt
 
 
 def options(origin, destination, weight_kg, volume_cbm=0, weight_break=None):
