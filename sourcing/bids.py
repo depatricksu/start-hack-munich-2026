@@ -29,9 +29,25 @@ LEAD = re.compile(r"(\d{1,3})\s*hours?\s+(?:from\s+(?:the\s+|your\s+)?order|afte
                   r"|lead\s*time:?\s+(\d{1,3})\s*hours?", re.I)                                 # Lead time 28 hours
 
 
+_UNITS = {w: i for i, w in enumerate("one two three four five six seven eight nine ten eleven twelve thirteen fourteen "
+                                     "fifteen sixteen seventeen eighteen nineteen".split(), 1)}
+_TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70}
+_SPOKEN = re.compile(r"\b(?:(%s)(?:[\s-]+(%s))?|(%s))(?=\s+hours?\b)" % ("|".join(_TENS), "|".join(list(_UNITS)[:9]), "|".join(_UNITS)), re.I)
+
+
+def spoken_hours(text):
+    """'we need seven hours from your order' -> 'we need 7 hours from your order'. A voice message transcript writes
+    small numbers as words; the model returned no hours at all for 'seven hours' (live, 21 Nov 22:55, Rheinufer)."""
+    def digits(m):
+        if m.group(3):
+            return str(_UNITS[m.group(3).lower()])
+        return str(_TENS[m.group(1).lower()] + (_UNITS[m.group(2).lower()] if m.group(2) else 0))
+    return _SPOKEN.sub(digits, text or "")
+
+
 def lead_hours(text):
     """Hours from order to collection, when the text states it once and clearly. None otherwise."""
-    found = {int(next(g for g in m.groups() if g)) for m in LEAD.finditer(text or "")}
+    found = {int(next(g for g in m.groups() if g)) for m in LEAD.finditer(spoken_hours(text))}
     return found.pop() if len(found) == 1 else None
 EXTRA_COLUMNS = {"email": "TEXT", "role": "TEXT", "required": "INTEGER DEFAULT 1", "status": "TEXT",
                  "total_eur": "TEXT", "note": "TEXT", "hours": "REAL"}
