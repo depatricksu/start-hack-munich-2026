@@ -104,7 +104,8 @@ def own_text(body, subject=""):
 
 def classify(body, subject=""):
     """accept / decline / better_price / faster / sending_docs / unclear. Only the customer's new text counts."""
-    text = own_text(body, subject)
+    # "so we won\u2019t go ahead" (typographic apostrophe) was read as "go ahead" = yes and BOOKED (live, round 72)
+    text = own_text(body, subject).replace("\u2019", "'").replace("\u2018", "'").replace("\u02bc", "'").replace("`", "'")
     if DECLINE.search(text) or NEGATED_ROMANCE.search(text) or (NEGATED_PROCEED.search(text) and not HEDGE.search(text)):   # definitive "won't proceed" = decline; "not yet" = wait (unclear)
         return "decline"
     if PRICE.search(text):
