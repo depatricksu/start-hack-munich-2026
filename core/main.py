@@ -22,6 +22,7 @@ from llm import clarify
 from sourcing import bids                               # truckers, rare lanes, rate desk: prices by mail (Kai)
 from booking import tracking
 from booking import handlers as booking                 # task 04: accept -> book -> keep the customer informed
+import humanize                                         # last touch on the quote mail (Riky)
 import dg                                               # dangerous goods in attachments -> the quote (Riky)
 
 _ZONES = os.path.join(config.ROOT, "kit", "start-kit", "pickup_zones.csv")
@@ -213,6 +214,13 @@ def finalize(tid):
 
     body, why = llm.final_reply(s["reply_template"], best, fields, s["customer"], tid)   # llm/: filled + quality gate
     best, body, _ = dg.apply(best, fields, body)            # DG paragraph (and surcharge if DG_MODE=surcharge)
+    try:                                                     # last human touch (Riky): signed name, answer their asks
+        first = db.con().execute("SELECT body FROM mails WHERE id=?", (tid,)).fetchone()
+        body, touched = humanize.polish(body, fields, best, first[0] if first else "")
+        if touched:
+            db.event("humanize", tid, changes=touched)
+    except Exception as e:
+        db.event("humanize_error", tid, error=str(e)[:200])
     if why:                                                  # the model's text failed the gate: our own template went out
         db.event("reply_gate", tid, reasons=why, language=fields.get("language"))
     subject = s["subject"] if s["subject"].lower().startswith("re:") else "Re: " + s["subject"]
