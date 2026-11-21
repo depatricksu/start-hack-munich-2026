@@ -71,6 +71,47 @@ def _pdf(data):
         os.unlink(path)
 
 
+IMAGE_EXT = (".jpg", ".jpeg", ".png", ".heic", ".tif", ".tiff", ".gif", ".bmp", ".webp")
+OCR_SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ocr.swift")
+OCR_BIN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "ocr_bin")   # data/ is git-ignored
+OCR_TIMEOUT_S = float(os.environ.get("DG_OCR_TIMEOUT_S", "10"))
+
+
+def ocr_binary():
+    """The compiled macOS Vision OCR tool. Built once (~3 s) on first use; None when there is no swiftc (not a Mac)."""
+    if os.path.exists(OCR_BIN):
+        return OCR_BIN
+    if not shutil.which("swiftc"):
+        return None
+    try:
+        os.makedirs(os.path.dirname(OCR_BIN), exist_ok=True)
+        tmp = OCR_BIN + ".%d" % os.getpid()
+        r = subprocess.run(["swiftc", "-O", OCR_SRC, "-o", tmp], capture_output=True, timeout=120)
+        if r.returncode == 0:
+            os.replace(tmp, OCR_BIN)                           # atomic: two clerks never see half a binary
+            return OCR_BIN
+    except Exception:
+        pass
+    return None
+
+
+def ocr(data, suffix):
+    """Text in a photo / scan (macOS Vision, ~0.8 s). "" when not possible."""
+    binary = ocr_binary()
+    if not binary:
+        return ""
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+        f.write(data)
+        path = f.name
+    try:
+        r = subprocess.run([binary, path], capture_output=True, text=True, timeout=OCR_TIMEOUT_S)
+        return r.stdout if r.returncode == 0 else ""
+    except Exception:
+        return ""
+    finally:
+        os.unlink(path)
+
+
 def attachment_text(data, filename=""):
     """Best-effort text of one attachment. Never raises."""
     if not data:
@@ -82,7 +123,10 @@ def attachment_text(data, filename=""):
         if name.endswith(".docx") or (data[:2] == b"PK" and b"word/" in data[:4000]):
             return _docx(data)
         if name.endswith(".pdf") or data[:5] == b"%PDF-":
-            return _pdf(data)
+            text = _pdf(data)
+            return text if len(text.strip()) > 20 else (ocr(data, ".pdf") or text)   # a scanned PDF has no text layer
+        if name.endswith(IMAGE_EXT) or data[:3] == b"\xff\xd8\xff" or data[:8] == b"\x89PNG\r\n\x1a\n":
+            return ocr(data, os.path.splitext(name)[1] or ".jpg")
         return data.decode("utf-8", "replace")                 # csv, txt, eml body
     except Exception:
         return ""
@@ -110,6 +154,16 @@ def check_mail(mail):
     """The one call for an RFQ: DG declared in any attachment (or, with a UN number, in the mail itself)?
     Returns {"un", "class", "name", "file"} or None. Never raises."""
     try:
+        done = [f for f in mail.get("attachments_text") or [] if f.get("text")]   # core/attachments.py read them (Kai)
+        if done:
+            from .facts import remember
+            remember(mail.get("id"), "\n".join(f["text"] for f in done))
+            for f in done:
+                info = read_declaration(f["text"])
+                if info:
+                    return dict(info, file=f.get("filename"))
+            info = read_declaration(mail.get("body") or "")
+            return dict(info, file="mail body") if info else None
         files = []
         for att in mail.get("attachments") or []:
             name = att.get("filename") or att.get("name") or "attachment"

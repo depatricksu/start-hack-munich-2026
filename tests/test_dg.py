@@ -114,6 +114,19 @@ class Attachments(unittest.TestCase):
         self.assertIsNone(dg.check_mail({"id": 3, "body": "x", "attachments": [{"filename": "a.pdf"}]}))   # no id, no bytes
         self.assertEqual(dg.check_mail({"id": 4, "body": "Hazmat, Class 9 lithium batteries", "attachments": []})["class"], "9")
 
+    def test_check_mail_reuses_text_read_at_intake(self):
+        mail = {"id": 5, "body": "General cargo", "attachments": [{"filename": "PL.xlsx"}],
+                "attachments_text": [{"filename": "PL.xlsx", "text": "Dangerous goods: UN1133, Class 3, Adhesives"}]}
+        self.assertEqual(dg.check_mail(mail)["file"], "PL.xlsx")
+
+    @unittest.skipUnless(__import__("shutil").which("swiftc"), "OCR needs macOS")
+    def test_photo_is_read_by_ocr(self):
+        import os
+        path = os.path.join(os.path.dirname(__file__), "..", "kit", "start-kit", "danube-wings-cargo-tariff-2026-11-p2.jpg")
+        text = dg.attachment_text(open(path, "rb").read(), "scan.jpg")
+        self.assertIn("CGN-SYD", text)
+        self.assertIn("1,13", text)
+
     def test_clean_files_and_garbage_give_none(self):
         self.assertIsNone(dg.scan_attachments([("note.txt", b"General cargo, non-dangerous")]))
         self.assertEqual(dg.attachment_text(b"PK\x03\x04broken", "x.xlsx"), "")
