@@ -202,6 +202,25 @@ def request_by_mail(tid, chosen, fields):
                         body, thread_id=tid)
 
 
+_AMOUNT = re.compile(r"(\d{1,3}(?:[.,\s]\d{3})*[.,]\d{2}|\d+[.,]\d{2})")
+
+
+def chosen_from_reply(s):
+    """A human sent the quote (take-over queue): find the option whose price is in their reply text."""
+    options = json.loads(s["options"] or "[]")
+    amounts = set()
+    for m in _AMOUNT.finditer(s["reply"] or ""):
+        a = m.group(1).replace(" ", "")
+        a = a.replace(".", "").replace(",", ".") if re.search(r",\d{2}$", a) else a.replace(",", "")
+        amounts.add(Decimal(a))
+    hits = [o for o in options for k in ("total_eur", "total") if o.get(k) and Decimal(str(o[k])) in amounts]
+    if not hits:
+        return None
+    db.update_session(s["thread_id"], chosen=hits[0])
+    db.event("chosen_from_human_reply", s["thread_id"], airline=hits[0].get("airline"), total=hits[0].get("total"))
+    return hits[0]
+
+
 def handle_follow_up(mail):
     tid = mail["thread_id"]
     s = db.session(tid)
@@ -223,7 +242,9 @@ def handle_follow_up(mail):
     if verdict == "unclear":
         return _needs_human(tid, mail["id"], "customer answered the quote, not a clear yes or no")
 
-    chosen, fields = json.loads(s["chosen"]), json.loads(s["fields"] or "{}")
+    chosen, fields = (json.loads(s["chosen"] or "null") or chosen_from_reply(s)), json.loads(s["fields"] or "{}")
+    if not chosen:                                             # quote sent by a human with a price we cannot match
+        return _needs_human(tid, mail["id"], "no_chosen_quote: customer accepted a quote sent by a human, book by hand")
     if chosen.get("parts"):                                    # several shipments (pricing/multi.py): book by hand for now
         return _needs_human(tid, mail["id"], "multi_shipment accepted: book each part by hand: " + "; ".join(
             "%s-%s %s %s EUR" % (p["origin"], p["destination"], p["airline"], p["total_eur"]) for p in chosen["parts"]))

@@ -298,3 +298,27 @@ class TestCalendar(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestHumanQuoteAccept(unittest.TestCase):
+    """Live bug 21 Nov 16:05: quote sent by a human (no `chosen`), customer accepts -> crash."""
+
+    def _human_quote(self, tid, reply):
+        quote(tid)
+        db.update_session(tid, chosen=None, status="quoted", reply=reply, note="sent by a human")
+        return json.loads(db.session(tid)["options"])
+
+    def test_price_in_reply_is_matched(self):
+        opts = self._human_quote(97701, "")
+        db.update_session(97701, reply="Hi Anna, all-in %s EUR with %s." % (opts[0]["total"], opts[0]["airline"]))
+        answer(97701, 1, "Please go ahead and book it.")
+        s = db.session(97701)
+        self.assertNotEqual(s["status"], "needs_human", s["note"])
+        self.assertEqual(json.loads(s["chosen"])["airline"], opts[0]["airline"])
+
+    def test_unknown_price_goes_to_human_without_crash(self):
+        self._human_quote(97711, "Hi Anna, special price 999.99 EUR.")
+        answer(97711, 1, "Please go ahead and book it.")
+        s = db.session(97711)
+        self.assertEqual(s["status"], "needs_human")
+        self.assertIn("no_chosen_quote", s["note"])
