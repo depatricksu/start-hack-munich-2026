@@ -22,6 +22,7 @@ STATUS_TEXT = {
     "confirmed": "booked and confirmed by the airline",
     "failed": "booking not completed yet, our team is on it",
     "cancelled_by_airline": "the airline could not confirm this flight, our team is rebooking it on the next option",
+    "cancelled": "cancelled at the customer's request, nothing will be picked up",
 }
 
 
@@ -148,6 +149,7 @@ STATUS_TEXT_DE = {
     "confirmed": "gebucht und von der Airline bestätigt",
     "failed": "noch nicht fertig gebucht, wir sind dran",
     "cancelled_by_airline": "noch nicht bestätigt (die Airline hat den Flug abgesagt, wir buchen gerade um)",
+    "cancelled": "auf Wunsch des Kunden storniert, es wird nichts abgeholt",
 }
 
 

@@ -434,6 +434,8 @@ def after_booking(s, mail):
     if not kind:
         return db.event("follow_up_ignored", tid, mail["id"], status=s["status"],
                         why="thanks" if _THANKS_ONLY.match(_answer_lines(text)) else "nothing to act on")
+    if kind == "cancellation" and cancel_booking(s, mail, text):
+        return
     db.update_session(tid, status="needs_human", note="AFTER BOOKING, customer %s: %s" % (kind.upper(), text.replace("\n", " ")[:300]))
     db.event("after_booking_" + kind, tid, mail["id"], was=s["status"])
     from llm.extract import SIGNER
@@ -441,6 +443,43 @@ def after_booking(s, mail):
     lang = "de" if (b.get("language") or "").lower().startswith("de") else "en"
     ref = b.get("booking_reference") or crm.team_reference(tid)
     _reply_session(s, mail, ACK_AFTER[lang] % ((" (%s)" % ref) if ref else "", SIGNER), "after_booking_" + kind)
+
+
+CANCEL_DONE = {
+    "en": "Hi,\n\nunderstood, I have cancelled booking %s with %s. Nothing will be picked up or charged for it.\n\n"
+          "If you need it again later, just send me the details and I will quote it fresh.\n\nBest regards\n%s\nAir Export",
+    "de": "Hallo,\n\nverstanden, ich habe die Buchung %s bei %s storniert. Es wird nichts abgeholt oder berechnet.\n\n"
+          "Wenn Sie die Sendung später doch brauchen, schicken Sie mir einfach die Daten und ich mache ein neues Angebot.\n\n"
+          "Viele Grüße\n%s\nLuftfracht Export",
+}
+_NOT_A_CANCEL = re.compile(r"(\?|\b(?:don'?t|do not|not|no need to|nicht|kein\w*)\s+(?:\w+\s+){0,2}(?:cancel|storn)\w*|"
+                           r"cancel\w* (?:policy|terms|fee|conditions|charges?)|stornogeb\w*|stornobedingung\w*)", re.I)
+
+
+def cancel_booking(s, mail, text):
+    """5U 00:13: DELETE /v1/portal/bookings/{ref} cancels a booking (portal or mail-booked, before or after its
+    confirmation). A clear 'please cancel' after the booking is done here: cancel at 5U, mark the CRM, confirm to the
+    customer. A question about cancelling, a negation ('don't cancel'), no booking reference or a failed call -> False,
+    and the caller raises it for a human as before. Returns True when it was handled."""
+    tid = s["thread_id"]
+    b = crm.get(tid) or {}
+    ref = b.get("booking_reference")
+    if not ref or _NOT_A_CANCEL.search(_answer_lines(text) or text):
+        return False
+    if config.DRY_RUN:
+        status, data = 200, {"booking_reference": ref, "status": "cancelled"}
+    else:
+        status, data = mailbox.api("DELETE", "/v1/portal/bookings/%s" % ref)
+    db.event("booking_cancel_call", tid, mail["id"], booking_reference=ref, status=status, response=str(data)[:300])
+    if status != 200:
+        return False
+    crm.upsert(tid, status="cancelled")
+    db.update_session(tid, status="cancelled", note="customer cancelled, booking %s cancelled at 5U" % ref)
+    from llm.extract import SIGNER
+    lang = "de" if (b.get("language") or "").lower().startswith("de") else "en"
+    _reply_session(s, mail, CANCEL_DONE[lang] % (ref, b.get("airline") or "the airline", SIGNER), "booking_cancelled")
+    db.event("booking_cancelled", tid, mail["id"], booking_reference=ref)
+    return True
 
 
 def handle_faster(s, mail):

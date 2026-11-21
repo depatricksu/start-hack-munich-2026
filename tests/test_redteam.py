@@ -275,7 +275,7 @@ class TestRound5Batch1(unittest.TestCase):
 
     def test_cancel_change_complaint_reach_a_human(self):
         from core import db
-        for i, (body, kind) in enumerate((("Please cancel the booking, our customer cancelled.", "CANCELLATION"),
+        for i, (body, kind) in enumerate((("Do we have to pay a fee if we cancel later?", "CANCELLATION"),   # a question: human
                                           ("The goods will only be ready on 2026-11-28, please adjust.", "CHANGE"),
                                           ("The truck did not show up today!", "COMPLAINT"))):
             tid = 9840000 + i * 10
