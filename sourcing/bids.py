@@ -266,11 +266,20 @@ def must_wait(thread_id):
             or (no_flight and not _usable(thread_id, "airline") and "airline" in open_roles))
 
 
+def _f(x):
+    """float or None: a transit time written as text ('1-2', '2 days') must never crash a quote (review 21 Nov)."""
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        m = re.findall(r"\d+(?:[.,]\d+)?", str(x or ""))
+        return float(m[-1].replace(",", ".")) if m else None   # '1-2' -> 2: the slower end, never an optimistic promise
+
+
 def bid_hours(b):
     """Hours of a bid row. Old rows have only transit_days."""
-    if b.get("hours") is not None:
-        return float(b["hours"])
-    return float(b["transit_days"]) * 24 if b.get("transit_days") is not None else None
+    if _f(b.get("hours")) is not None:
+        return _f(b["hours"])
+    return _f(b.get("transit_days")) * 24 if _f(b.get("transit_days")) is not None else None
 
 
 def pick_bid(bids_, prefer):
@@ -311,7 +320,7 @@ def final_options(thread_id, options):
             # airline). The cheaper/faster of the two wins in finalize; Patrick's outlier check drops a misread bid.
             days = b["transit_days"] if b["transit_days"] is not None else 99   # unknown speed never wins "fastest"
             options = options + [{"airline": b["carrier"], "origin": fields.get("origin"),
-                                  "destination": fields.get("destination"), "transit_days": int(-(-float(days) // 1)),
+                                  "destination": fields.get("destination"), "transit_days": int(-(-(_f(days) if _f(days) is not None else 99) // 1)),
                                   "currency": b["currency"], "total": b["total"], "total_eur": b["total_eur"],
                                   "source": "bid", "bid_id": b["id"]}]
         db.event("bids_merged", thread_id, added=[[b["carrier"], b["total_eur"], b["transit_days"]] for b in air])
@@ -333,7 +342,7 @@ def final_options(thread_id, options):
                      candidates=[[x["carrier"], x["total_eur"], bid_hours(x)] for x in air])
             days = b["transit_days"] if b["transit_days"] is not None else 0
             options = [{"airline": b["carrier"], "origin": fields.get("origin"), "destination": fields.get("destination"),
-                        "transit_days": int(-(-float(days) // 1)), "currency": b["currency"], "total": b["total"],
+                        "transit_days": int(-(-(_f(days) if _f(days) is not None else 99) // 1)), "currency": b["currency"], "total": b["total"],
                         "total_eur": b["total_eur"], "source": "bid", "bid_id": b["id"]}]
     if any(b["role"] == "trucker" for b in bs):       # door pickup: no trucker price means no quote
         trucks = _usable(thread_id, "trucker")

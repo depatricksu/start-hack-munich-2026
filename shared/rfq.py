@@ -373,7 +373,9 @@ def _cross_check(llm: RFQ, rx: RFQ) -> list[str]:
     return out
 
 
-_NEG_WEIGHT = re.compile(r"(?<![\w.])-\s*\d[\d.,]*\s*(kg|kgs|t|tons?|tonnen)\b", re.I)
+_NEG_WEIGHT = re.compile(r"(?:^|(?<=[\s:=(]))-(?=\d)\d[\d.,]*\s*(kg|kgs|t|tons?|tonnen)\b(?![^\n]*\b-\s*\d)", re.I | re.M)
+# A minus GLUED to the number ('-500 kg', 'Weight: -500kg'). A dash with a space is a bullet, a separator or a range:
+# '- 500 kg gross', '2 pallets - 500 kg', 'Lot 1 - 300 kg', '500 - 600 kg' are normal mails (review 21 Nov, Riky).
 _THOUSANDS = re.compile(r"(?<![\d.,])(\d{1,3})[.,](\d{3})(?![\d.,])\s*(kg|kgs)\b", re.I)
 
 

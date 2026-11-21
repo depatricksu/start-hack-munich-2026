@@ -22,10 +22,10 @@ def route(mail, our_address="google@hackloop.mail"):
     sender, subject = mail["sender"], mail["subject"].lower()
     if sender == our_address:
         return "own"
+    if sender == "tracking@hackloop.mail":                    # exact: tracking@evil.mail is a customer. FIRST: a tracking
+        return "tracking"                                    # question 'Status of booking BK-...' is not a confirmation
     if re.search(r"booking\s+bk-", subject):
         return "booking_confirmation"
-    if sender == "tracking@hackloop.mail":                    # exact: tracking@evil.mail is a customer
-        return "tracking"
     if sender == "ratedesk@hackloop.mail":
         return "ratedesk"
     if sender in CARRIERS:

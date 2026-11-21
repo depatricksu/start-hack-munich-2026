@@ -57,7 +57,7 @@ def _total(stated, from_pieces):
     """The model often gives the SAME total twice: 'weight_kg': 676 and pieces 12 x 56.33 kg (= 676). That is one
     shipment, not two lots: adding them doubled the weight (real requests 268, 1631, 5246 -> priced as 1,352 kg,
     rejected too high). Equal within 2 % -> one total. Different -> separate lots, add them (round 9). (Riky)"""
-    if stated and from_pieces and abs(stated - from_pieces) <= 0.02 * max(stated, from_pieces):
+    if stated and from_pieces and abs(stated - from_pieces) <= 0.15 * max(stated, from_pieces):   # rounded piece weights (500 vs 4x120) are one total; real separate lots differ far more (round 9: 67 %)
         return stated
     return stated + from_pieces
 
@@ -141,7 +141,8 @@ def price_and_quote(tid, mail, fields, asked=False):
     o, d = fields["origin"], fields["destination"]           # already clean IATA from _airport()
     options = [dict(x, total_eur=x["total"]) for x in sheets.options(o, d, weight, volume)]
     try:
-        options += portal.options(o, d, weight, volume)
+        options += [x for x in portal.options(o, d, weight, volume) if not x.get("fx_missing")]   # a USD price with no
+        # exchange rate must never be summed with an EUR trucker and labelled EUR (multi.py already drops these)
     except Exception as e:                                   # portal down: sheets still work
         db.event("portal_error", tid, mail["id"], error=str(e))
     db.update_session(tid, options=options)
