@@ -4,7 +4,7 @@ The model never does math and never invents a price. It returns:
   - the shipment fields as JSON (code computes weight, volume and price from them)
   - a reply text with placeholders {PRICE} {AIRLINE} {TRANSIT_DAYS}, which code fills in later
 """
-import json, os, re, zlib
+import http.client, json, os, re, time, zlib
 from core import config, mailbox
 from . import lang as langmod, quality
 
@@ -287,18 +287,73 @@ def _clip(body, head=3000, tail=3000):
     return body if len(body) <= head + tail else body[:head] + "\n[...]\n" + body[-tail:]
 
 
-def _call_and_parse(messages, max_tokens):
-    """One gateway call. Returns (fields or None, raw response). None means the JSON could not be parsed
-    (for example truncated because max_tokens was too small for a long reply)."""
-    status, data = mailbox.api("POST", "/v1/gateway/chat/completions", timeout=45, body={
+# A transient gateway failure must not lose the round (about 60 points): retry 429, 5xx and network errors.
+# GATEWAY_RETRY_BUDGET_S is the wall clock for ALL attempts of one mail (time score: full under 120 s, zero at 360 s).
+GATEWAY_RETRY_BUDGET_S = float(os.environ.get("GATEWAY_RETRY_BUDGET_S", "90"))
+GATEWAY_MAX_ATTEMPTS = int(os.environ.get("GATEWAY_MAX_ATTEMPTS", "6"))
+GATEWAY_TIMEOUT_S = 45                                   # one attempt; shorter when less budget is left
+_BACKOFF_S = (1, 2, 4, 8)                                # pause after the 1st, 2nd, ... failure without a Retry-After
+# urlopen timeout / refused / reset / DNS (OSError), a broken response (HTTPException), an undecodable body (ValueError)
+_TRANSIENT = (OSError, http.client.HTTPException, ValueError)
+_clock, _sleep = time.monotonic, time.sleep              # tests swap these for a fake clock
+
+
+def _log(kind, thread_id=None, **data):
+    try:
+        from core import db
+        db.event(kind, thread_id, **data)
+    except Exception:
+        pass
+
+
+def _budget(mail):
+    """Deadline for all gateway attempts of this mail: the retry budget, but never past the RFQ's own expiry."""
+    budget = GATEWAY_RETRY_BUDGET_S
+    if mail.get("received_at"):
+        budget = min(budget, mail["received_at"] + config.RFQ_MAX_AGE_S - time.time())
+    return _clock() + max(budget, 0)
+
+
+def _gateway(body, deadline, thread_id=None):
+    """POST to the gateway, status 200 -> the response. Retries 429 (waits its Retry-After), 408, 5xx and
+    timeouts/connection errors (backoff 1, 2, 4, 8 s) until `deadline` or GATEWAY_MAX_ATTEMPTS. Any other
+    4xx raises at once: the request itself is wrong. The first attempt is always made; a success is never repeated."""
+    attempt = 0
+    while True:
+        attempt += 1
+        left = deadline - _clock()
+        try:
+            status, data = mailbox.api("POST", "/v1/gateway/chat/completions",
+                                       timeout=min(GATEWAY_TIMEOUT_S, max(left, 10)), body=body)
+        except _TRANSIENT as e:
+            status, data = None, "%s: %s" % (type(e).__name__, e)
+        if status == 200:
+            return data
+        err = "gateway %s: %s" % (status if status is not None else "unreachable", str(data)[:300])
+        if status is not None and status not in (408, 429) and status < 500:
+            raise RuntimeError(err)
+        if status == 429 and isinstance(data, dict) and data.get("retry_after") is not None:
+            wait = max(float(data["retry_after"]), 0.5)      # the server said when: earlier is another 429
+        else:
+            wait = _BACKOFF_S[min(attempt, len(_BACKOFF_S)) - 1]
+        left = deadline - _clock()
+        if attempt >= GATEWAY_MAX_ATTEMPTS or wait >= left:
+            raise RuntimeError("%s (gave up after %d attempt(s), %.0f s of budget left, next wait %.1f s)"
+                               % (err, attempt, max(left, 0), wait))
+        _log("gateway_retry", thread_id, attempt=attempt, status=status, wait_s=wait, error=str(data)[:200])
+        _sleep(wait)
+
+
+def _call_and_parse(messages, max_tokens, deadline=None, thread_id=None):
+    """One gateway call (repeated only when it FAILED, see _gateway). Returns (fields or None, raw response).
+    None means the JSON could not be parsed (for example truncated because max_tokens was too small for a long reply)."""
+    data = _gateway({
         "model": config.LLM_MODEL, "max_completion_tokens": max_tokens, "response_format": {"type": "json_object"},
         "messages": messages,
-    })
-    if status != 200:
-        raise RuntimeError("gateway %s: %s" % (status, str(data)[:300]))
+    }, _clock() + GATEWAY_RETRY_BUDGET_S if deadline is None else deadline, thread_id)
     try:
         return json.loads(data["choices"][0]["message"]["content"]), data
-    except (KeyError, ValueError, json.JSONDecodeError):
+    except (KeyError, IndexError, TypeError, ValueError):
         return None, data
 
 
@@ -311,7 +366,8 @@ def _merge_usage(first, second):
 
 
 def extract(mail):
-    """Returns (fields dict, usage dict). Exactly one gateway call."""
+    """Returns (fields dict, usage dict). Exactly one gateway call when it works; a failed call (429, 5xx, timeout)
+    is retried inside one shared time budget, and only raises (-> needs_human) when that is used up."""
     detected = langmod.detect(_text(mail))                  # counted in code, no call
     if config.LLM_FAKE:
         return _annotate(_fake(mail), mail, detected), {"fake": True}
@@ -319,9 +375,10 @@ def extract(mail):
     user = "Subject: %s\n\n%s" % (mail["subject"], _clip(mail["body"]))
     messages = [{"role": "system", "content": SYSTEM},
                 {"role": "user", "content": user + ("\n\n[%s]" % hint if hint else "")}]
-    fields, data = _call_and_parse(messages, config.LLM_MAX_TOKENS)
+    deadline, tid = _budget(mail), mail.get("thread_id")
+    fields, data = _call_and_parse(messages, config.LLM_MAX_TOKENS, deadline, tid)
     if fields is None:                                   # truncated/invalid JSON: retry once with more room (rare; logged)
-        fields, data2 = _call_and_parse(messages, config.LLM_MAX_TOKENS * 2)
+        fields, data2 = _call_and_parse(messages, config.LLM_MAX_TOKENS * 2, deadline, tid)
         if fields is None:
             raise RuntimeError("gateway returned unparsable JSON twice: %s" % str(data2)[:300])
         data = _merge_usage(data, data2)

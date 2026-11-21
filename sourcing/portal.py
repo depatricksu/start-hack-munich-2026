@@ -18,8 +18,26 @@ LANES = {(l["origin"], l["destination"]): l["airlines"] for l in json.load(open(
 REFRESH_S = float(os.environ.get("PORTAL_REFRESH_S", "180"))
 BREAK_DEPTH = int(os.environ.get("PORTAL_BREAK_DEPTH", "4"))          # how many higher brackets we may try
 BREAK_TOLERANCE = float(os.environ.get("PORTAL_BREAK_TOLERANCE", "0.10"))  # keep climbing while within 10 %
+# A 429 with a short Retry-After is waited out once and the dropped reads are asked again; a long one (the
+# limit is a fixed one-minute window) is not: we quote with what we have. RETRY_BUDGET_S caps the extra time
+# one options() call may spend on waits and second tries (time score: full under 120 s).
+RETRY_MAX_WAIT_S = float(os.environ.get("PORTAL_RETRY_MAX_WAIT_S", "5"))
+RETRY_BUDGET_S = float(os.environ.get("PORTAL_RETRY_BUDGET_S", "10"))
+_clock, _sleep = time.monotonic, time.sleep              # tests swap these for a fake clock
 _lanes_at = 0.0
 _BREAKS = {}                     # airline code -> (read_at, weight breaks)
+
+
+class _Miss(str):
+    """A rate read we did not get. Equal to its kind as a string: 'limit' (429) or 'error' (5xx, timeout,
+    connection error, payload we could not read). Carries Retry-After and the reason for the log."""
+    retry_after, detail = 0.0, ""
+
+
+def _miss(kind, detail="", retry_after=0.0):
+    m = _Miss(kind)
+    m.detail, m.retry_after = str(detail)[:200], retry_after
+    return m
 
 
 def _log(kind, **data):
@@ -56,8 +74,12 @@ def _breaks(code):
     hit = _BREAKS.get(code)
     if hit and time.time() - hit[0] < REFRESH_S:
         return hit[1]
-    status, r = mailbox.api("GET", "/v1/portal/brackets", params={"airline": code})
-    breaks = [float(b) for b in (r.get("breaks_kg") or [])] if status == 200 else (hit[1] if hit else [])
+    try:
+        status, r = mailbox.api("GET", "/v1/portal/brackets", params={"airline": code})
+        breaks = [float(b) for b in (r.get("breaks_kg") or [])] if status == 200 else (hit[1] if hit else [])
+    except Exception as e:                           # one failed read: this airline gets no ladder, the rest go on
+        _log("portal_read_error", what="brackets", airline=code, error="%s: %s" % (type(e).__name__, e))
+        return hit[1] if hit else []                 # not cached, so the next quote asks again
     if hit and breaks != hit[1]:
         _log("setup_change", what="weight_breaks", airline=code, before=hit[1], after=breaks)
     _BREAKS[code] = (time.time(), breaks)
@@ -65,14 +87,25 @@ def _breaks(code):
 
 
 def _rate(origin, destination, code, weight_kg, volume_cbm):
-    """One rate read -> option dict, or 'limit' on 429, or None."""
-    status, r = mailbox.api("GET", "/v1/portal/rates", params={
-        "origin": origin, "destination": destination, "airline": code,
-        "weight_kg": weight_kg, "volume_cbm": volume_cbm})
-    if status == 429:            # out of budget this minute: quote with what we have
-        return "limit"
-    if status != 200:
-        return None
+    """One rate read -> option dict, 'limit' on 429, 'error' on a transient failure, or None (not priced here).
+    Never raises: one broken read must not cost the other airlines. It runs in worker threads, so it does not
+    log (the DB connection belongs to the main thread); options() logs what a _Miss carries."""
+    try:
+        status, r = mailbox.api("GET", "/v1/portal/rates", params={
+            "origin": origin, "destination": destination, "airline": code,
+            "weight_kg": weight_kg, "volume_cbm": volume_cbm})
+        if status == 429:            # out of budget this minute
+            return _miss("limit", r, float(r.get("retry_after", 5)) if isinstance(r, dict) else 5.0)
+        if status in (500, 502, 504):                    # 503 is not transient here: "get this rate elsewhere"
+            return _miss("error", "HTTP %s: %s" % (status, r))
+        if status != 200:
+            return None
+        return _option(r, origin, destination, code, weight_kg)
+    except Exception as e:           # timeout, connection reset, a payload without the documented fields
+        return _miss("error", "%s: %s" % (type(e).__name__, e))
+
+
+def _option(r, origin, destination, code, weight_kg):
     stated = r.get("fx_eur_per_usd")                 # EUR per 1 unit of the price's currency, only for non-EUR prices
     fx_missing = r["currency"] != "EUR" and not stated
     if fx_missing:                                   # we cannot turn it into EUR: never relabel the number as EUR
@@ -107,13 +140,37 @@ def options(origin, destination, weight_kg, volume_cbm=0, weight_break=None):
         _log("portal_refresh_error", error=str(e))
     airlines = LANES.get((origin, destination), [])
     # Base bracket: one read per airline, fired in parallel (independent GETs) so the quote is faster.
-    rated = []
-    if airlines:
-        with ThreadPoolExecutor(max_workers=min(len(airlines), 8)) as ex:
-            rated = list(ex.map(lambda a: _rate(origin, destination, a["code"], weight_kg, volume_cbm), airlines))
+    lane, deadline = "%s-%s" % (origin, destination), _clock() + RETRY_BUDGET_S
+
+    def read_all(todo):
+        if not todo:
+            return []
+        with ThreadPoolExecutor(max_workers=min(len(todo), 8)) as ex:
+            return list(ex.map(lambda a: _rate(origin, destination, a["code"], weight_kg, volume_cbm), todo))
+
+    rated = read_all(airlines)
     if "limit" in rated:                                  # hit the per-minute rate limit: keep hits, skip the weight-break
         use_break = False
-    out.extend(o for o in rated if o and o != "limit")
+    missed = [i for i, r in enumerate(rated) if isinstance(r, _Miss)]
+    if missed:                                            # 429 or a transient error: one more try, if it is cheap
+        code = lambda i: airlines[i]["code"]
+        limited = [code(i) for i in missed if rated[i] == "limit"]
+        errors = {code(i): rated[i].detail for i in missed if rated[i] != "limit"}
+        wait = max(rated[i].retry_after for i in missed)
+        retried = wait <= RETRY_MAX_WAIT_S and _clock() + wait <= deadline
+        if retried:
+            if wait > 0:
+                _sleep(wait)
+            for i, r in zip(missed, read_all([airlines[i] for i in missed])):
+                rated[i] = r
+            if "limit" in rated:
+                use_break = False
+        lost = [code(i) for i in missed if isinstance(rated[i], _Miss)]
+        if limited:
+            _log("portal_limit", lane=lane, phase="base", airlines=limited, retry_after=wait, retried=retried, lost=lost)
+        if errors:
+            _log("portal_read_error", lane=lane, phase="base", errors=errors, retried=retried, lost=lost)
+    out.extend(o for o in rated if isinstance(o, dict))
     if use_break:
         # Round 9: nobody got full price points, our next-bracket price was > 5 % above the best -> look deeper.
         # Pass 1 = the next bracket for every airline. Then, per airline, keep climbing one bracket at a time while
@@ -133,10 +190,20 @@ def options(origin, destination, weight_kg, volume_cbm=0, weight_break=None):
             nxt_live = []
             for c in live:
                 o = _rate(origin, destination, c, ladders[c][level[c]], volume_cbm)
-                if o == "limit":
-                    return out
+                if o == "limit":                         # short Retry-After and budget left: wait once, ask again
+                    wait = o.retry_after
+                    retried = wait <= RETRY_MAX_WAIT_S and _clock() + wait <= deadline
+                    if retried:
+                        _sleep(wait)
+                        o = _rate(origin, destination, c, ladders[c][level[c]], volume_cbm)
+                    _log("portal_limit", lane=lane, phase="weight_break", airlines=[c], billed_kg=ladders[c][level[c]],
+                         retry_after=wait, retried=retried, lost=[c] if o == "limit" else [])
+                    if o == "limit":
+                        return out
                 level[c] += 1
-                if not o:
+                if isinstance(o, _Miss):                 # this airline's ladder ends here, the others go on
+                    _log("portal_read_error", lane=lane, phase="weight_break", errors={c: o.detail}, retried=False, lost=[c])
+                if not isinstance(o, dict):
                     continue
                 o["weight_break"] = True
                 out.append(o)
