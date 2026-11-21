@@ -60,16 +60,33 @@ def chargeable_kg(weight_kg, volume_cbm=0):
     return max(_d(weight_kg), _d(volume_cbm) * VOL_FACTOR)
 
 
-def price_lane(rec, weight_kg, volume_cbm=0):
-    cw = chargeable_kg(weight_kg, volume_cbm)
-    idx = max(i for i, b in enumerate(rec["breaks_kg"]) if cw >= b)
+# Weight-break trick: billing at the next break start can be cheaper (lower rate x a bit more weight).
+# Off until 5U confirms its scorer uses it (CLAUDE.md open question). WEIGHT_BREAK=1 turns it on.
+WEIGHT_BREAK = os.environ.get("WEIGHT_BREAK", "0") == "1"
+
+
+def _total_at(rec, billed):
+    idx = max(i for i, b in enumerate(rec["breaks_kg"]) if billed >= b)
     rate = _d(rec["rates_per_kg"][idx])
-    freight = max(_d(rec["min_charge"]), rate * cw)
-    total = freight + (_d(rec["fuel_per_kg"]) + _d(rec["security_per_kg"])) * cw
+    freight = max(_d(rec["min_charge"]), rate * billed)
+    return freight + (_d(rec["fuel_per_kg"]) + _d(rec["security_per_kg"])) * billed, rate
+
+
+def price_lane(rec, weight_kg, volume_cbm=0, weight_break=None):
+    cw = chargeable_kg(weight_kg, volume_cbm)
+    billed = cw
+    total, rate = _total_at(rec, cw)
+    if WEIGHT_BREAK if weight_break is None else weight_break:
+        for b in rec["breaks_kg"]:
+            if _d(b) > cw:
+                t, r = _total_at(rec, _d(b))
+                if t < total:
+                    billed, total, rate = _d(b), t, r
     return {
         "airline": rec["airline"], "origin": rec["origin"], "destination": rec["destination"],
         "transit_days": rec["transit_days"], "currency": rec["currency"],
-        "chargeable_kg": str(cw), "rate_per_kg": str(rate), "min_applied": rate * cw < _d(rec["min_charge"]),
+        "chargeable_kg": str(cw), "billed_kg": str(billed), "rate_per_kg": str(rate),
+        "min_applied": rate * billed < _d(rec["min_charge"]),
         "total": str(total.quantize(Decimal("0.01"), ROUND_HALF_UP)), "source": "sheet",
     }
 
