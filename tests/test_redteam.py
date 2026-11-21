@@ -359,5 +359,25 @@ class TestFootersAndOutlookQuotes(unittest.TestCase):
         self.assertEqual(classify("Yes please book.\n\n-----Original Message-----\nFrom: Lena\nSent: today\n\n" + self.OUR), "accept")
 
 
+class TestLookalikeYesNo(unittest.TestCase):
+    """Red-team round 8: 'confirming receipt' is not a yes (was BOOKED); 'not a problem, go ahead' is not a no (was lost)."""
+    def test_receipt_and_later_are_not_a_yes(self):
+        from booking.handlers import classify
+        for t in ("Confirming receipt of your offer, we will get back to you.",
+                  "We confirm we received your quote and will review it on Monday.",
+                  "Passt soweit, ich gebe Ihnen morgen Bescheid."):
+            self.assertEqual(classify(t), "unclear", t)
+
+    def test_benign_negations_are_not_a_no(self):
+        from booking.handlers import classify
+        for t in ("Not a problem at all, please go ahead.", "Never mind my previous question, please book it.",
+                  "I don't see any issue, please proceed.", "No objections from our side, go ahead and book."):
+            self.assertEqual(classify(t), "accept", t)
+        for t in ("Thanks, but we will not proceed this time.", "We won't go ahead, thanks."):
+            self.assertEqual(classify(t), "decline", t)
+        for t in ("Please don't book yet.", "No problem, but please wait until Monday before booking."):
+            self.assertEqual(classify(t), "unclear", t)
+
+
 if __name__ == "__main__":
     unittest.main()

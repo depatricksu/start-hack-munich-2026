@@ -151,11 +151,22 @@ VALIDITY = re.compile(r"\b(how long (?:is|will) (?:the|this|your) (?:offer|quote
                       r"g[üu]ltig(?:keit)?|validit[àé])\b", re.I)
 
 
+# Harmless negations that sit right before "go ahead": "Not a problem, please go ahead" is a yes, not a decline.
+BENIGN_NO = re.compile(r"\b(not a problem|no problem|never ?mind|(?:i |we )?do(?:n'?t| not) see any (?:issue|problem)s?|"
+                       r"no (?:issues?|objections?|worries|concerns?)|nothing (?:to add|against it)|kein problem|keine einw[äa]nde)\b", re.I)
+# "Confirming receipt of your offer" / "we confirm we received your quote" is an acknowledgement, not a booking.
+RECEIPT = re.compile(r"\b(confirm\w*|bestätig\w*|acknowledg\w*)\b[^.!?\n]{0,30}\b(receipt|received|receiving|got your|eingang|erhalt\w*)|"
+                     r"\b(receipt|eingang)\b[^.!?\n]{0,20}\b(confirm\w*|bestätig\w*)", re.I)
+LATER = re.compile(r"\b(get back to you|come back to you|revert|will (?:review|decide|check|discuss)|review it|"
+                   r"melde mich|melden uns|gebe ihnen (?:morgen |noch )?bescheid|r[üu]ckmeldung folgt)\b", re.I)
+
+
 def classify(body, subject=""):
     """accept / decline / better_price / faster / sending_docs / unclear. Only the customer's new text counts."""
     # "so we won\u2019t go ahead" (typographic apostrophe) was read as "go ahead" = yes and BOOKED (live, round 72)
     text = own_text(body, subject).replace("\u2019", "'").replace("\u2018", "'").replace("\u02bc", "'").replace("`", "'")
-    if DECLINE.search(text) or NEGATED_ROMANCE.search(text) or (NEGATED_PROCEED.search(text) and not HEDGE.search(text)):   # definitive "won't proceed" = decline; "not yet" = wait (unclear)
+    calm = BENIGN_NO.sub(" ", text)            # "not a problem, please go ahead" must not read as "not ... go ahead"
+    if DECLINE.search(calm) or NEGATED_ROMANCE.search(calm) or (NEGATED_PROCEED.search(calm) and not HEDGE.search(calm)):   # definitive "won't proceed" = decline; "not yet" = wait (unclear)
         return "decline"
     if AUTO_REPLY.search(text):                # an out-of-office robot is no answer: the quote stays open
         return "auto_reply"
@@ -163,8 +174,10 @@ def classify(body, subject=""):
         return "better_price"
     if SENDING_DOCS.search(text):              # "Passt, das Sicherheitsdatenblatt schicken wir nach": a yes, papers follow (#58)
         return "sending_docs"
+    if RECEIPT.search(text) or LATER.search(text):   # "confirming receipt, we'll get back to you": not a yes yet
+        return "validity" if VALIDITY.search(text) else "unclear"
     facts = EXTRA_SERVICE.sub(" ", text)       # "book it, and insure it for EUR 25,000": the amount is a service wish
-    if ACCEPT.search(text) and not QUESTION.search(text) and not CONDITION.search(text) and not NEW_FACTS.search(facts):
+    if ACCEPT.search(text) and not QUESTION.search(text) and not CONDITION.search(calm) and not NEW_FACTS.search(facts):
         return "accept"
     if VALIDITY.search(text) and not ACCEPT.search(text):
         return "validity"
