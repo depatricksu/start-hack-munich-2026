@@ -436,6 +436,13 @@ def after_booking(s, mail):
                         why="thanks" if _THANKS_ONLY.match(_answer_lines(text)) else "nothing to act on")
     if kind == "cancellation" and cancel_booking(s, mail, text):
         return
+    if kind == "cancellation" and wants_cancel(text) and not (crm.get(tid) or {}).get("booking_reference"):
+        # booked by mail, the airline's reference is not here yet (live 00:51: request at :04, cancel at :22, reference
+        # at :47). Remember the wish: handle_booking_confirmation cancels the moment the reference arrives.
+        f = json.loads(s["fields"] or "{}")
+        f["cancel_wanted"] = mail["id"]
+        db.update_session(tid, fields=f)
+        db.event("cancel_wanted", tid, mail["id"], why="no booking reference yet")
     db.update_session(tid, status="needs_human", note="AFTER BOOKING, customer %s: %s" % (kind.upper(), text.replace("\n", " ")[:300]))
     db.event("after_booking_" + kind, tid, mail["id"], was=s["status"])
     from llm.extract import SIGNER
@@ -456,7 +463,23 @@ _NOT_A_CANCEL = re.compile(r"(\?|\b(?:don'?t|do not|not|no need to|nicht|kein\w*
                            r"cancel\w* (?:policy|terms|fee|conditions|charges?)|stornogeb\w*|stornobedingung\w*)", re.I)
 
 
-def cancel_booking(s, mail, text):
+# "Could you please cancel booking BK-1J8EL0PB and let me know once it's done?" is a request, not a question ABOUT
+# cancelling (live, 22 Nov 00:52: three such mails stayed with a person until the booking was cancelled by hand).
+_CANCEL_REQUEST = re.compile(r"\b(?:(?:could|can|would|will) you (?:please |kindly )?(?:\w+\s+){0,2}?cancel|please (?:\w+\s+){0,2}?cancel|"
+                             r"need to cancel|have to cancel|k[öo]nn(?:t)?en sie (?:\w+\s+){0,4}?storn\w*|bitte (?:\w+\s+){0,3}?storn\w*)", re.I)
+_CANCEL_NEGATED = re.compile(r"\b(?:don't|do not|not|no need to|nicht|kein\w*)\s+(?:\w+\s+){0,2}(?:cancel|storn)\w*", re.I)
+CANCEL_NOTE = "AFTER BOOKING, customer CANCELLATION"
+
+
+def wants_cancel(text):
+    """True for a clear 'cancel it', also when it is phrased as a polite question."""
+    answer = (_answer_lines(text) or text or "").replace("\u2019", "'").replace("\u2018", "'")
+    if _CANCEL_NEGATED.search(answer):
+        return False
+    return bool(_CANCEL_REQUEST.search(answer)) or not _NOT_A_CANCEL.search(answer)
+
+
+def cancel_booking(s, mail, text, force=False):
     """5U 00:13: DELETE /v1/portal/bookings/{ref} cancels a booking (portal or mail-booked, before or after its
     confirmation). A clear 'please cancel' after the booking is done here: cancel at 5U, mark the CRM, confirm to the
     customer. A question about cancelling, a negation ('don't cancel'), no booking reference or a failed call -> False,
@@ -464,7 +487,7 @@ def cancel_booking(s, mail, text):
     tid = s["thread_id"]
     b = crm.get(tid) or {}
     ref = b.get("booking_reference")
-    if not ref or _NOT_A_CANCEL.search(_answer_lines(text) or text):
+    if not ref or b.get("status") == "cancelled" or not (force or wants_cancel(text)):
         return False
     if config.DRY_RUN:
         status, data = 200, {"booking_reference": ref, "status": "cancelled"}
@@ -664,6 +687,11 @@ def handle_follow_up(mail):
         return clarify.answer(mail)
     if s and s["status"] in ("new", "waiting_bids") and mail["sender"] == (s["customer"] or "").lower():
         return correction_before_quote(s, mail)                  # they changed the shipment before our quote went out
+    if s and s["status"] == "needs_human" and (s.get("note") or "").startswith(CANCEL_NOTE) \
+            and mail["sender"] == (s["customer"] or "").lower():
+        if cancel_booking(s, mail, own_text(mail["body"], mail.get("subject"))):   # "could you please cancel booking BK-...?"
+            return None
+        return db.event("follow_up_ignored", tid, mail["id"], status=s["status"], why="cancellation is with a person")
     if s and s["status"] == "needs_human" and (s.get("note") or "").startswith(UNCLEAR_NOTE):
         s = dict(s, status="quoted")                             # 'does it include X?' then 'ok, book it': read the new mail
         db.update_session(tid, status="quoted", note="customer wrote again after an unclear reply")
@@ -808,6 +836,13 @@ def handle_booking_confirmation(mail):
     crm.upsert(b["thread_id"], status="confirmed", confirmed_at=time.time(),
                booking_reference=b["booking_reference"] or (ref and ref.group(0)))
     waiting = db.session(b["thread_id"])
+    wanted = waiting and json.loads(waiting["fields"] or "{}").get("cancel_wanted")
+    if wanted:                                                   # the customer cancelled while we waited for this reference
+        db.event("booking_confirmed", b["thread_id"], mail["id"], booking_reference=ref and ref.group(0), held="customer cancelled")
+        if cancel_booking(waiting, {"id": wanted, "thread_id": b["thread_id"], "subject": waiting["subject"], "body": ""}, "", force=True):
+            return None
+        return db.update_session(b["thread_id"], status="needs_human",
+                                 note=CANCEL_NOTE + ": the cancel call failed, cancel booking %s by hand" % (ref and ref.group(0)))
     if waiting and waiting["status"] == "reprice_proposed":      # the customer has not agreed to the new price yet
         return db.event("booking_confirmed", b["thread_id"], mail["id"], booking_reference=ref and ref.group(0),
                         held="customer has not confirmed the new price")
