@@ -23,6 +23,25 @@ class TestSpam(unittest.TestCase):
                      "Hi, can you help us ship 120 kg to Singapore?"]:
             self.assertEqual(route(m(body, "Request")), "rfq", body)
 
+    def test_vendor_pitch_is_dropped(self):
+        """5U 21:21, the real mail: it mentions quotes and RFQs but has no shipment in it."""
+        pitch = ("Hi there,\n\nI noticed your company handles air export quotes. Most forwarders we talk to lose 30% of "
+                 "their RFQs because replies are too slow.\n\nFreightSoft Pro answers every RFQ in under 60 seconds. Could "
+                 "we book 15 minutes this week to show you a demo? Just reply with a time that suits you.\n\nCheers\n"
+                 "Tom Becker\nAccount Executive, FreightSoft Pro")
+        self.assertEqual(route(m(pitch, "Quick question about your quoting process")), "spam")
+        self.assertEqual(route(m("Our platform cuts freight costs. Schedule a call with our sales team?", "Save 20%")), "spam")
+
+    def test_a_request_with_sales_words_is_still_a_request(self):
+        for body in ["Could we book a call? We also need a quote for 300 kg from FRA to JFK.",
+                     "Our account executive asked me to request a rate: 2 pallets, 1.4 cbm, pickup in 80331 Munich.",
+                     "Please quote MUC-ORD for our product samples, details follow.",
+                     "Can you show us a demo of your tracking? Shipment is 85 kg to Dubai."]:
+            self.assertEqual(route(m(body, "Request")), "rfq", body)
+        with_file = dict(m("Our software team sends the packing list attached, please book a call if unclear."),
+                         attachments=[{"filename": "packing-list.pdf"}])
+        self.assertEqual(route(with_file), "rfq")                # an attachment may hold the shipment: never dropped
+
     def test_reply_in_thread_is_not_spam(self):
         self.assertEqual(route(m("You won a prize!", start=False)), "follow_up")
 
