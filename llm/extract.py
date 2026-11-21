@@ -16,13 +16,14 @@ SYSTEM = """You work at an air freight forwarder in Germany. Read the customer's
  "volume_cbm": total volume in cubic meters if stated directly, else null,
  "pieces": [{"count": n, "l_cm": n, "w_cm": n, "h_cm": n, "kg_each": n or null}] if dimensions are given, else [],
  "prefer": "fastest" if the customer asks for the fastest/most urgent option, else "cheapest",
+ "language": ISO 639-1 code of the language the customer wrote in ("en", "de", ...),
  "missing": list of fields you could not find,
  "reply": the reply email body
 }
 Do not calculate anything. Copy numbers as written (convert units to cm and kg only).
-The reply: same language as the customer, short, warm, like a real colleague wrote it, no AI phrases.
+The reply: write it in the language of the customer's email, never any other (an English email gets an English reply, a German email a German reply). Greet with the full name exactly as written (for example "Guten Tag K. Weber" or "Hi Anna"); never add Frau, Herr, Mr or Ms. Short, warm, like a real colleague wrote it, no AI phrases.
 State one all-in price using exactly the placeholder {PRICE}. Mention {AIRLINE} and {TRANSIT_DAYS} days transit.
-Never write a number for the price yourself. Sign as "Your forwarding team"."""
+Never write a number for the price yourself. Sign as "Your forwarding team" (in German: "Ihr Forwarding-Team")."""
 
 # USD per 1M tokens (input, output). Only used for our own log; 5U measures the real cost.
 PRICES = {"gpt-4o-mini": (0.15, 0.60)}

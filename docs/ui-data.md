@@ -21,6 +21,9 @@ All times are Unix seconds (float). JSON columns are stored as text: parse them.
 
 **Expiry countdown** = `received_at + 360` (an RFQ expires 6 minutes after arrival). Time score: full under 120 s, zero at 360 s.
 
+**Trap: do not use `deadline` for the countdown.** `deadline` is when we stop waiting for carrier bids (arrival + 90 s by default).
+If the countdown used `deadline`, it would show 90 seconds and say "expired" 4 minutes too early. Use arrival time plus 360 seconds.
+
 ## Session status
 `new` > `waiting_bids` > `sending` > `quoted`. Side exits: `needs_human` (could not price safely), `expired`, `failed`.
 Not built yet: `booked` (needs the follow-up and booking handler).
@@ -47,10 +50,14 @@ reason code and points. Call it from the UI server, never from the browser (the 
 - Score panel: a route handler calls `/v1/board/me` with the key from the server env. The key never reaches the browser.
 - Take-over writes only the `actions` table (proposal below). The UI never sends mail itself: only `core/` sends.
 
-## Proposed additions (need the `core/` owner to agree)
-1. **Take-over.** The UI is read-only, so a human reply needs a table `actions(id, thread_id, kind, body, created_at, done_at)`.
-   The UI inserts `kind='send_reply'` or `'pause'`; `core/` polls it and sends through `mailbox.send` (the only sender).
-2. **Booking.** When the customer accepts: session `status='booked'` plus columns `booking_ref`, `rate_id`.
-3. **Language.** Add `language` to `fields` (the extractor already replies in the customer's language).
-4. **Reason code.** Keep `note` short and machine-friendly (for example `no_lane`, `missing_weight`, `door_pickup`, `rate_expired`)
-   so the UI can show an icon, with the long text after a colon.
+## The 4 additions the UI needs that the backend does not have yet
+These need the `core/` owner to agree (they touch `core/`).
+1. **Take-over.** You click "send my own reply" in the UI, but only the runner may send mail. So the UI writes a note into a new
+   `actions` table (`id, thread_id, kind, body, created_at, done_at`: "send this text in thread X"; `kind` is `send_reply` or `pause`).
+   The runner checks the table every second and sends it through `mailbox.send`.
+2. **Booking.** When a customer accepts, the system books. The database needs a `booked` status and a booking reference
+   (`booking_ref`, `rate_id`) so the screen can show them.
+3. **Language.** DONE 21 Nov: `fields.language` (`en`, `de`, ...) is now filled by the extractor and the reply is written in it.
+   The UI shows it as a flag.
+4. **Reason codes.** When a case goes to a human, `note` is free text. Short codes like `missing_weight`, `no_lane`, `door_pickup`,
+   `rate_expired` let the UI show an icon and a clear message. Format: `code: long text`.
