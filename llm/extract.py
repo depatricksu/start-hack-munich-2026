@@ -29,7 +29,15 @@ SYSTEM = """You work at an air freight forwarder in Germany. Read the customer's
 }
 Do not calculate anything. Copy numbers as written (convert units to cm and kg only).
 The reply: write it in the language of the customer's email, never any other (an English email gets an English reply, a German email a German reply). Greet with the name exactly as the customer signed (for example "Hi Anna" or "Guten Tag K. Weber"); never add Frau, Herr, Mr or Ms; no name -> "Hello" / "Guten Tag".
-Write like an experienced, friendly forwarder answering between two calls: 3 to 5 short sentences, plain words, no lists, no headings.
+Write like an experienced, friendly forwarder answering between two calls: plain words, no lists, no headings.
+Mirror the customer: if they wrote one or two lines, answer in two or three sentences; if they wrote a long mail, at most five.
+If they wrote casually ("Hi", "Hey", first name, no greeting), be casual and use contractions; if formal ("Dear Sir or Madam",
+"Sehr geehrte"), stay formal. In German always use "Sie". Never start with a thank-you formula; start with their shipment.
+Two examples of the voice we want (placeholders as in your reply; do not copy the wording):
+  Customer: "Hi, price for 300 kg MUC to JFK please, cheapest. Tom"
+  Reply: "Hi Tom,\n\n{ROUTE} for your {WEIGHT}: {AIRLINE} is the cheapest right now at {PRICE} all-in, about {TRANSIT_DAYS} days.\n\nJust reply and I'll book it."
+  Customer: "Sehr geehrte Damen und Herren, wir benötigen ein Angebot für 2 Paletten Maschinenteile, 640 kg, Abholung 70565, nach Shanghai, möglichst schnell."
+  Reply: "Guten Tag,\n\nfür Ihre zwei Paletten Maschinenteile ({WEIGHT}) {ROUTE} ist {AIRLINE} die schnellste Option: {PRICE} all-in inklusive Abholung, Laufzeit rund {TRANSIT_DAYS} Tage.\n\nWenn das passt, genügt eine kurze Antwort und ich buche."
 Refer to THEIR shipment in their own words (what it is, where from and to, a detail they mentioned) so it is clearly not a form letter. Use {ROUTE} and {WEIGHT} if you want, code fills them in.
 Never use: "I hope this email finds you well", "Thank you for reaching out", "Certainly", "delighted", "Please do not hesitate", "valued customer", exclamation marks in a row, emojis.
 State one all-in price using exactly the placeholder {PRICE}. Mention {AIRLINE} and {TRANSIT_DAYS} days transit.
@@ -139,7 +147,49 @@ def fill_reply(template, best, fields, customer="", thread_id=0):
     body = re.sub(r"\{(PRICE|AIRLINE|TRANSIT_DAYS|ROUTE|WEIGHT|SIGNER|HELLO)\}", lambda m: vals[m.group(1)], template)
     if re.search(r"\{[A-Z_]+\}", body):                      # unknown placeholder from the model: use our own text
         return fill_reply("", best, fields, customer, thread_id)
+    body = _add_expert_note(body, expert_note(best, fields, lang), vals["PRICE"])
     return _own_signature(body, lang, thread_id)
+
+
+def _kg(x, lang):
+    txt = "{:,.0f}".format(float(x))
+    return txt.replace(",", ".") if lang == "de" else txt
+
+
+def expert_note(best, fields, lang):
+    """One TRUE detail only a forwarder would add, computed by code from our own pricing (never by the model).
+    Weight break used -> say which weight we billed and why; volume decides -> say the chargeable weight."""
+    try:
+        actual = float(fields.get("weight_kg_total") or fields.get("weight_kg") or 0)
+        volume = float(fields.get("volume_cbm_total") or fields.get("volume_cbm") or 0)
+        billed = float(best.get("billed_kg") or 0)
+    except (TypeError, ValueError):
+        return ""
+    if actual <= 0:
+        return ""
+    chargeable = max(actual, volume * 167)
+    if billed > chargeable + 0.5:
+        if lang == "de":
+            return ("Ich habe mit %s kg statt %s kg gerechnet, weil die nächste Gewichtsstufe pro Kilo günstiger ist "
+                    "und es für Sie so insgesamt billiger wird." % (_kg(billed, lang), _kg(chargeable, lang)))
+        return ("I've billed it at %s kg rather than %s kg, since the next weight bracket is cheaper per kilo "
+                "and that brings your total down." % (_kg(billed, lang), _kg(chargeable, lang)))
+    if volume * 167 > actual * 1.15:
+        if lang == "de":
+            return "Wegen des Volumens (%s cbm) zählt hier das Volumengewicht von %s kg." % (
+                ("%.2f" % volume).replace(".", ","), _kg(chargeable, lang))
+        return "Because of the volume (%.2f cbm), the chargeable weight here is %s kg." % (volume, _kg(chargeable, lang))
+    return ""
+
+
+def _add_expert_note(body, note, price_text):
+    """Append the note to the paragraph that states the price (else before the last paragraph)."""
+    if not note:
+        return body
+    paras = body.split("\n\n")
+    idx = next((i for i, p in enumerate(paras) if price_text in p), max(len(paras) - 2, 0))
+    paras[idx] = paras[idx].rstrip() + " " + note
+    return "\n\n".join(paras)
 
 
 def safe_reply(text, lang="en", multi=False):
