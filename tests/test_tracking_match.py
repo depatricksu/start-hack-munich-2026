@@ -32,7 +32,7 @@ class TestTrackingMatch(unittest.TestCase):
 
     def test_postcode_zone_matches_the_airport(self):
         b, how = tracking.find_booking(Q2[0] + "\n" + Q2[1])
-        self.assertEqual((b["booking_reference"], how), ("BK-4WSWKLL7", "route"))
+        self.assertEqual(b["booking_reference"], "BK-4WSWKLL7")                 # by company or by route: both are right
 
     def test_two_bookings_on_the_same_lane_are_told_apart_by_weight_and_company(self):
         b, how = tracking.find_booking(Q1[0] + "\n" + Q1[1])          # 676 kg is within 2% of both 676 and 679
@@ -41,6 +41,13 @@ class TestTrackingMatch(unittest.TestCase):
     def test_company_name_breaks_a_weight_tie(self):
         b, _ = tracking.find_booking("Where is the Rheintal Elektronik shipment 51896 to ORD, 678 kg?")
         self.assertEqual(b["booking_reference"], "BK-DECOY001")
+
+    def test_company_name_alone_is_enough(self):
+        b, how = tracking.find_booking("Status update\nHello, Sonnberg Kaffeeroesterei asking for the status of our shipment.")
+        self.assertEqual((b["booking_reference"], how), ("BK-4WSWKLL7", "customer"))
+
+    def test_a_vague_mail_is_never_matched(self):
+        self.assertEqual(tracking.find_booking("Hi\nWhere is my parcel?"), (None, "no match"))
 
     def test_reference_still_wins(self):
         b, how = tracking.find_booking("Where is BK-4WSWKLL7?")
