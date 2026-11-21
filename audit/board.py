@@ -71,9 +71,13 @@ def table(rows, top=6, last_n=8):
     for rd in rounds:
         lines.append(f"{rd:>5}  " + "  ".join(f"{gains[rd].get(t, 0):>12.1f}" for t in leaders))
     lines.append("total  " + "  ".join(f"{now[t]:>12.1f}" for t in leaders))
-    hard = [rd for rd in rounds if sum(1 for v in gains[rd].values() if v >= 30) <= len(gains[rd]) // 3]
+    official = {r["round_no"]: r for row in rows for r in row.get("rounds") or [] if r.get("status") == "closed"}
+    hard = [f"{n} ({r['accepted']}/{r['answered']})" for n, r in sorted(official.items())[-last_n:]
+            if r.get("answered") and r["accepted"] <= r["answered"] / 2]
     if hard:
-        lines.append("hard rounds (most teams scored ~0, look for a 5U change): " + ", ".join(map(str, hard)))
+        lines.append("hard rounds by 5U's own count, accepted/answered (look for a 5U change): " + ", ".join(hard))
+    lines.append("note: a gain is counted when a round closes; fast teams already have points of the next round in it,"
+                 " so read single rounds with care and trust the trend")
     if US in now and rounds:
         behind = [rd for rd in rounds if max(gains[rd].values()) - gains[rd].get(US, 0) >= 5]
         if behind:
