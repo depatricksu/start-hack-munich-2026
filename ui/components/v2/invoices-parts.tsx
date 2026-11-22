@@ -1,9 +1,10 @@
 "use client";
-// Relay v2 Invoices: the table row (with inline body and "Mark paid"), the KPI tile and the side lists.
+// Relay v2 Invoices: the table row (opens the invoice, PDF download, "Mark paid"), the KPI tile and the side lists.
 import { ReactNode } from "react";
 import Link from "next/link";
-import { AnimatePresence, motion } from "motion/react";
-import { ChevronDown } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { motion } from "motion/react";
+import { Download } from "lucide-react";
 import type { Invoice } from "@/lib/invoices";
 import { Badge, Card, CardHead, EASE, Tone, day, eur, money, shortMail } from "@/components/v2/ui";
 
@@ -17,7 +18,7 @@ export const inFilter = (r: Invoice, f: Filter) =>
     : f === "reported" ? r.status === "paid_reported"
     : r.status === "paid";
 
-export const COLS = "grid-cols-[132px_minmax(120px,1fr)_112px_128px_150px_148px_92px]";
+export const COLS = "grid-cols-[132px_minmax(120px,1fr)_112px_128px_150px_148px_124px]";
 
 export function Kpi({ label, sub, children, tone }: { label: string; sub: ReactNode; children: ReactNode; tone?: string }) {
   return (
@@ -51,51 +52,37 @@ function Due({ r, now }: { r: Invoice; now: number }) {
   );
 }
 
-export function InvoiceRow({ r, now, open, onToggle, onPaid, busy, error }:
-  { r: Invoice; now: number; open: boolean; onToggle: () => void; onPaid: () => void; busy: boolean; error: string | null }) {
+export function InvoiceRow({ r, now, onPaid, busy, error }:
+  { r: Invoice; now: number; onPaid: () => void; busy: boolean; error: string | null }) {
+  const router = useRouter();
   const [label, tone] = statusOf(r);
   const payable = PAYABLE.includes(r.status);
+  const href = `/v2/invoices/${encodeURIComponent(r.number)}`;
   return (
     <li className="border-t border-[var(--hair)]">
-      <div onClick={onToggle}
-        className={`group grid ${COLS} cursor-pointer items-center gap-3 px-4 py-2.5 text-[13px] transition-colors duration-150 hover:bg-[var(--bg-2)] ${open ? "bg-[var(--bg-2)]" : ""}`}>
-        <button onClick={(e) => { e.stopPropagation(); onToggle(); }} aria-expanded={open}
-          className="tnum flex items-center gap-1.5 text-left text-[var(--fg)]">
-          <ChevronDown size={13} className={`shrink-0 text-[var(--fg-3)] transition-transform duration-150 ${open ? "rotate-180" : ""}`} />{r.number}
-        </button>
+      <div onClick={() => router.push(href)}
+        className={`group grid ${COLS} cursor-pointer items-center gap-3 px-4 py-2.5 text-[13px] transition-colors duration-150 hover:bg-[var(--bg-2)]`}>
+        <Link href={href} onClick={(e) => e.stopPropagation()} className="tnum text-left text-[var(--fg)] hover:underline">{r.number}</Link>
         <span className="truncate text-[var(--fg)]" title={r.customer}>{shortMail(r.customer)}</span>
         <span className="tnum truncate text-[var(--fg-2)]">{r.route ?? `#${r.thread_id}`}</span>
         <span className="tnum text-right text-[var(--fg)]">{money(r.amount, r.currency)}</span>
         <span className="pl-3"><Due r={r} now={now} /></span>
         <span><Badge tone={tone}>{label}</Badge></span>
-        <span className="flex justify-end">
+        <span className="flex items-center justify-end gap-1">
           {payable && (
             <button onClick={(e) => { e.stopPropagation(); onPaid(); }} disabled={busy}
               className={`btn btn-ghost h-7 px-2.5 text-[12px] transition-opacity duration-150 focus-visible:opacity-100 group-hover:opacity-100 ${busy ? "opacity-100" : "opacity-0"}`}>
               {busy ? "Saving" : "Mark paid"}
             </button>
           )}
+          <a href={`/api/invoices/${encodeURIComponent(r.number)}/pdf`} download onClick={(e) => e.stopPropagation()}
+            title={`Download ${r.number} as PDF`} aria-label={`Download ${r.number} as PDF`}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-[var(--fg-3)] transition-colors duration-150 hover:bg-[var(--bg-3)] hover:text-[var(--fg)]">
+            <Download size={14} />
+          </a>
         </span>
       </div>
       {error && <p className="px-4 pb-2 text-right text-[13px] text-[var(--bad)]">{error}</p>}
-      <AnimatePresence initial={false}>
-        {open && (
-          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.25, ease: EASE }} className="overflow-hidden">
-            <div className="px-4 pb-4 pt-1 pl-[34px]">
-              <div className="flex flex-wrap gap-x-6 gap-y-1 text-[13px] text-[var(--fg-3)]">
-                <span>Issued <span className="tnum text-[var(--fg-2)]">{day(r.issued_at)}</span></span>
-                <span>Reminders <span className="tnum text-[var(--fg-2)]">{r.reminders}</span></span>
-                <span>{r.sent ? "Mailed to the customer" : "Not mailed to the customer"}</span>
-                <Link href={`/v2/shipments?id=${r.thread_id}`} className="text-[var(--fg-2)] transition-colors duration-150 hover:text-[var(--fg)]">Open shipment</Link>
-              </div>
-              {r.body && (
-                <pre className="mt-3 max-h-72 overflow-y-auto whitespace-pre-wrap rounded-md border border-[var(--hair)] bg-[var(--bg)] p-4 font-sans text-[13px] leading-relaxed text-[var(--fg-2)] scroll-thin">{r.body}</pre>
-              )}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </li>
   );
 }

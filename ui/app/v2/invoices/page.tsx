@@ -1,5 +1,6 @@
 "use client";
-// Relay v2 Invoices: what is open, what is late, and who to call. "Mark paid" is the only write on this page.
+// Relay v2 Invoices: what is open, what is late, and who to call. A row opens the invoice document (/v2/invoices/<number>).
+// "Mark paid" is the only write on this page.
 import { useMemo, useState } from "react";
 import type { CarrierFlag, Invoice, InvoiceData } from "@/lib/invoices";
 import { Card, CountUp, Item, PageHead, Reveal, Segmented, Skeleton, eur, useJson, useNow } from "@/components/v2/ui";
@@ -29,7 +30,6 @@ export default function InvoicesPage() {
   const now = useNow(60000);
   const [filter, setFilter] = useState<Filter>("open");
   const [all, setAll] = useState(false);
-  const [open, setOpen] = useState<number | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
   // Optimistic "paid": thread_id -> time we marked it. Stays until the server agrees (or the POST fails).
   const [paidLocal, setPaidLocal] = useState<Record<number, number>>({});
@@ -99,7 +99,7 @@ export default function InvoicesPage() {
   const rows = d.rows.filter((r) => inFilter(r, filter));
   const shown = all ? rows : rows.slice(0, CAP);
   const overdue = [...d.overdue].sort((a, b) => b.amount - a.amount);
-  const pick = (f: Filter) => { setFilter(f); setAll(false); setOpen(null); };
+  const pick = (f: Filter) => { setFilter(f); setAll(false); };
 
   return (
     <div className="h-full overflow-y-auto scroll-thin">
@@ -137,7 +137,7 @@ export default function InvoicesPage() {
                 ]} />
               </div>
               <div className={`grid ${COLS} gap-3 border-t border-[var(--hair)] px-4 py-2 eyebrow`}>
-                <span className="pl-[19px]">Invoice</span><span>Customer</span><span>Route</span>
+                <span>Invoice</span><span>Customer</span><span>Route</span>
                 <span className="text-right">Amount</span><span className="pl-3">Due</span><span>Status</span><span />
               </div>
               {rows.length === 0 ? (
@@ -145,8 +145,7 @@ export default function InvoicesPage() {
               ) : (
                 <ul>
                   {shown.map((r) => (
-                    <InvoiceRow key={r.thread_id} r={r} now={now} open={open === r.thread_id}
-                      onToggle={() => setOpen((o) => (o === r.thread_id ? null : r.thread_id))}
+                    <InvoiceRow key={r.thread_id} r={r} now={now}
                       onPaid={() => markPaid(r)} busy={busy === r.thread_id} error={errors[r.thread_id] ?? null} />
                   ))}
                 </ul>
