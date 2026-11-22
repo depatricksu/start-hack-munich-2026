@@ -45,10 +45,23 @@ def spoken_hours(text):
     return _SPOKEN.sub(digits, text or "")
 
 
+ANY_HOURS = re.compile(r"(?<![\d.,:])(\d{1,3})\s*(?:hours?|hrs?|stunden|std\.?)\b", re.I)
+
+
 def lead_hours(text):
     """Hours from order to collection, when the text states it once and clearly. None otherwise."""
-    found = {int(next(g for g in m.groups() if g)) for m in LEAD.finditer(spoken_hours(text))}
-    return found.pop() if len(found) == 1 else None
+    text = spoken_hours(text)
+    found = {int(next(g for g in m.groups() if g)) for m in LEAD.finditer(text)}
+    if len(found) == 1:
+        return found.pop()
+    if not found:
+        # Plain-text offers word it freely: "Pickup is available within 31 hours", "The pickup lead time is 31 hours",
+        # "takes 10 hours from pickup". A trucker's mail has ONE hours figure. The model read 31 as 24 on one of them
+        # (round 90, 22 Nov 01:02): the wrong trucker was picked and accuracy fell from 45 to 32.7.
+        every = {int(n) for n in ANY_HOURS.findall(text)}
+        if len(every) == 1:
+            return every.pop()
+    return None
 EXTRA_COLUMNS = {"email": "TEXT", "role": "TEXT", "required": "INTEGER DEFAULT 1", "status": "TEXT",
                  "total_eur": "TEXT", "note": "TEXT", "hours": "REAL"}
 _ready = False

@@ -81,11 +81,15 @@ def lines(tid, session, best, fields, body, today=None):
         out.append("Pickup: by truck from postcode %s to %s airport, included" % (fields["pickup_postcode"], route.split(" - ")[0]))
     if kg:
         out.append("Shipment: %s kg gross%s" % (("%g" % kg), (", %g cbm" % cbm) if cbm else ""))
-    if best.get("billed_kg") or best.get("chargeable_kg"):
-        out.append("Chargeable weight: %s kg" % (best.get("billed_kg") or best.get("chargeable_kg")))
+    volume_kg = float(cbm or 0) * 167                          # the same rule the quote uses: 1 cbm = 167 kg
+    if kg and volume_kg > float(kg) + 0.5:                     # only when the volume decides, as the mail says it
+        out.append("Chargeable weight: %d kg (by volume)" % round(volume_kg))
     out.append("Airline: %s" % (best.get("airline") or ""))
     if best.get("transit_days") is not None:
         out.append("Transit time: about %s day%s" % (best["transit_days"], "" if str(best["transit_days"]) == "1" else "s"))
+    if best.get("insurance"):
+        i = best["insurance"]
+        out.append("Cargo insurance: %s EUR, included (%s%% of %s EUR goods value at %s%%)" % (i["premium"], i["pct"], i["value"], i["rate"]))
     out += ["", "ALL-IN PRICE: %s %s" % (best.get("total"), best.get("currency") or "EUR"), ""]
     if fields.get("dg"):
         out += ["Dangerous goods: yes, documents required before booking", ""]
