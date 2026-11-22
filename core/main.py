@@ -10,7 +10,7 @@ To add a feature, write a handler in your own folder and register it in HANDLERS
 import csv, json, os, re, sys, time, traceback, urllib.error
 from decimal import Decimal
 from . import attachments, config, db, mailbox, safety, offer_file, recall
-from router.route import route
+from router.route import route, lookalike
 from llm import extract as llm
 from pricing import price as sheets, insurance, customs
 from sourcing import portal, portal_page
@@ -490,9 +490,13 @@ HANDLERS = {
 def process(mail):
     if not db.save_mail(mail):
         return                                               # seen before (restart): never handle twice
-    r = route(mail, config.OUR_ADDRESS)
+    customers = [x[0] for x in db.con().execute("SELECT DISTINCT customer FROM sessions WHERE status != 'ignored'").fetchall()]
+    r = route(mail, config.OUR_ADDRESS, customers)
     db.set_route(mail["id"], r)
     db.event("mail_in", mail["thread_id"], mail["id"], route=r, sender=mail["sender"], subject=mail["subject"])
+    if r == "spam" and lookalike(mail["sender"], customers):  # say why, for the person who looks at the log
+        db.event("lookalike_sender", mail["thread_id"], mail["id"], sender=mail["sender"],
+                 looks_like=lookalike(mail["sender"], customers), replied=False)
     if r in ("rfq", "follow_up", "carrier_bid", "ratedesk") and mail["attachments"]:
         attachments.read(mail)                               # every file -> text, once (core/attachments.py)
         if r == "rfq":
