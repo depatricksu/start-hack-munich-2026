@@ -68,6 +68,54 @@ def wanted(mail_text):
     return None
 
 
+BLOCK = re.compile(r"(?m)^[ \t]*(\d{1,2})[.)][ \t]+(.*(?:\n(?![ \t]*\d{1,2}[.)][ \t]|[ \t]*\n).*)*)")   # "1. GRU ...", "2) TLV ..."
+EACH = re.compile(r"\b(each|per shipment|for both|for all|je sendung|jeweils|pro sendung|chacun\w*|par envoi|ciascun\w*|per spedizione|cada)\b", re.I)
+UNCLEAR = "unclear"
+
+
+def _terms(value, pct, rate):
+    premium = (value * pct / 100 * rate / 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return {"value": _plain(value), "pct": _plain(pct), "rate": str(rate), "premium": str(premium)}
+
+
+def wanted_many(mail_text, n):
+    """Insurance terms for a request with n shipments, in the customer's order.
+    -> a list of n dicts, or None when the mail states no insurance terms, or UNCLEAR when it asks for insurance but
+    the goods values cannot be matched to the shipments (one value for two shipments, with no word like 'each').
+    Values are taken from each numbered shipment line when every line has one, else from the insurance paragraph when
+    it lists as many amounts as there are shipments; share and premium rate are stated once for all."""
+    text = (mail_text or "").split("\n--- attached file:")[0]
+    if n <= 1:
+        one = wanted(text)
+        return [one] if one else None
+    blocks = {int(m.group(1)): m.group(2) for m in BLOCK.finditer(text)}
+    paras = [p for p in re.split(r"\n\s*\n", text) if re.search(WORD, p, re.I)]
+    if not paras:
+        return None
+    if any(REFUSED.search(p) for p in paras):
+        return None
+    scope = "\n".join(paras + [b for b in blocks.values() if AMOUNT.search(b)])
+    shares = {_num(x) for x in PERCENT.findall(scope)}
+    pct, rate = [p for p in shares if p >= 50], [p for p in shares if p < 5]
+    in_blocks = [[_num(a) for a in AMOUNT.findall(blocks.get(i, ""))] for i in range(1, n + 1)]
+    listed = [_num(a) for p in paras for a in AMOUNT.findall(BLOCK.sub("", p))]
+    if not pct and not rate and not listed and not any(in_blocks):
+        return None                                           # "is insurance available?": nothing to price
+    if len(pct) != 1 or len(rate) != 1:
+        return UNCLEAR
+    if all(len(b) == 1 for b in in_blocks):
+        values = [b[0] for b in in_blocks]
+    elif len(listed) == n:
+        values = listed
+    elif len(listed) == 1 and EACH.search(scope):
+        values = listed * n
+    else:
+        return UNCLEAR
+    if any(v <= 0 for v in values):
+        return UNCLEAR
+    return [_terms(v, pct[0], rate[0]) for v in values]
+
+
 def add(best, ins):
     """The option with the premium inside its all-in total. The flight price stays in flight_total (the portal books
     the flight at that price)."""
