@@ -98,7 +98,7 @@ const STATUS: Record<string, [string, Tone]> = {
   quoted: ["Quoted", "idle"], booking: ["Booking", "info"], booking_requested: ["Booking", "info"],
   booked: ["Booked", "ok"], confirmed: ["Confirmed", "ok"], awaiting_docs: ["Waiting for documents", "warn"],
   lost: ["Lost", "idle"], cancelled: ["Cancelled", "idle"], expired: ["Expired", "idle"],
-  needs_human: ["Needs you", "warn"], failed: ["Failed", "bad"], declined: ["Declined", "idle"],
+  needs_human: ["Marked", "warn"], failed: ["Failed", "bad"], declined: ["Declined", "idle"],
 };
 export function statusInfo(s: string): [string, Tone] {
   return STATUS[s] ?? [s.replaceAll("_", " ").replace(/^./, (c) => c.toUpperCase()), "idle"];
