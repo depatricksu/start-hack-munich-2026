@@ -44,7 +44,7 @@ export function RequestList({ sessions, rows, filter, setFilter, counts, query, 
         <div className="[&_button]:whitespace-nowrap [&_button]:px-1.5 [&>div]:flex [&>div]:w-full [&_button]:flex-1">
           <Segmented id="req-filter" value={filter} onChange={setFilter} options={[
             { value: "all", label: "All", count: counts.all },
-            { value: "need", label: "Needs you", count: counts.need },
+            { value: "need", label: "Marked", count: counts.need },
             { value: "live", label: "In flight", count: counts.live },
             { value: "done", label: "Done", count: counts.done },
           ]} />
@@ -67,7 +67,7 @@ export function RequestList({ sessions, rows, filter, setFilter, counts, query, 
           </div>
         ) : rows.length === 0 ? (
           <p className="px-3 py-6 text-[13px] text-[var(--fg-2)]">
-            {query ? "No request matches this search." : filter === "need" ? "Nothing needs you right now." : filter === "live" ? "No request is being worked on right now." : "No requests yet."}
+            {query ? "No request matches this search." : filter === "need" ? "Nothing is marked right now." : filter === "live" ? "No request is being worked on right now." : "No requests yet."}
           </p>
         ) : (
           // Keyed on filter and search, so switching them swaps the list at once; only new mail slides in.

@@ -98,7 +98,7 @@ export function getNotifications(now = Date.now() / 1000): Notice[] {
     const missed = s.status === "expired", failed = s.status === "failed" || note.startsWith("error:");
     out.push({
       id: `status-${thread}-${s.status}-${Math.floor(ts)}`, ts, severity: missed || failed ? "critical" : "warning",
-      title: missed ? "Request missed" : failed ? "Something went wrong" : "Request stopped",
+      title: missed ? "Request missed" : failed ? "Something went wrong" : "Request marked",
       detail: note.slice(0, 170) || "The agent could not finish this request.",
       context: byThread.get(thread)?.lane ?? String(s.customer ?? ""), action: "Take a look", href: `/v2/requests?id=${thread}`,
     });

@@ -24,7 +24,7 @@ export const EVENT_LABEL: Record<string, string> = {
   tracking_lookup: "Customer asked for status", tracking_answered: "Status sent to the customer",
   booking_cancel_call: "Booking cancelled with the airline", booking_cancelled: "Booking cancelled",
   after_booking_cancellation: "Customer cancelled", status_corrected: "Status corrected",
-  needs_human: "Handed to you", human_action: "Answered by a person", rfq_expired: "Request expired",
+  needs_human: "Marked", human_action: "Answered by a person", rfq_expired: "Request expired",
   invoice_issued: "Invoice drafted",
 };
 

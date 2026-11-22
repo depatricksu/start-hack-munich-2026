@@ -2,8 +2,9 @@
 // Centre pane of v2 Requests: what the customer asked, what we quoted, and the mail thread.
 import { useState } from "react";
 import Link from "next/link";
-import { AlertTriangle } from "lucide-react";
-import { Badge, Card, CardHead, Skeleton, day, money, route, useJson } from "@/components/v2/ui";
+import { AnimatePresence, motion } from "motion/react";
+import { AlertTriangle, ChevronDown } from "lucide-react";
+import { Badge, Card, CardHead, EASE, Skeleton, day, money, route, useJson } from "@/components/v2/ui";
 import { FileChips, bestOption, customerName, needsYou, noteText, quoteBadge, sameOption, sourceName } from "@/components/v2/requests-data";
 import type { FileRef, Option, SessionDetail } from "@/lib/types";
 import { volumeText, weightText } from "@/lib/shipment-facts";
@@ -176,9 +177,22 @@ function Thread({ d }: { d: SessionDetail }) {
     items.push({ key: "reply", ts: d.quoted_at ?? last + 0.001, side: "us", label: "Our reply", sender: "sent by Relay", body: d.reply, files: d.reply_files });
   }
   items.sort((x, y) => x.ts - y.ts);
+  // Closed at first (Erik, 22 Nov): the page stays short, and one click shows every mail.
+  const [open, setOpen] = useState(false);
   return (
-    <Card>
-      <CardHead title="Mail thread" hint={`${items.length} ${items.length === 1 ? "mail" : "mails"}`} />
+    <Card pad={false}>
+      <button onClick={() => setOpen((o) => !o)} aria-expanded={open} className="flex w-full items-baseline gap-3 px-5 py-4 text-left">
+        <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-[var(--fg)]">Mail thread</h2>
+        <span className="text-[13px] text-[var(--fg-3)]">{items.length} {items.length === 1 ? "mail" : "mails"}</span>
+        <span className="flex-1" />
+        <span className="text-[13px] text-[var(--fg-2)]">{open ? "Hide" : "Show"}</span>
+        <ChevronDown size={15} className={`self-center text-[var(--fg-2)] transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+      </button>
+      <AnimatePresence initial={false}>
+      {open && (
+      <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+        transition={{ duration: 0.3, ease: EASE }} className="overflow-hidden">
+      <div className="px-5 pb-5">
       {items.length === 0 ? <p className="text-[13px] text-[var(--fg-2)]">No mail in this thread yet.</p> : (
         <ol className="space-y-3">
           {items.map((it) => {
@@ -203,6 +217,10 @@ function Thread({ d }: { d: SessionDetail }) {
           })}
         </ol>
       )}
+      </div>
+      </motion.div>
+      )}
+      </AnimatePresence>
     </Card>
   );
 }
@@ -216,8 +234,8 @@ export function RequestDetail({ d }: { d: SessionDetail }) {
         <div className="flex gap-3 rounded-xl border border-[color-mix(in_srgb,var(--warn)_30%,transparent)] bg-[var(--warn-soft)] p-4">
           <AlertTriangle size={16} className="mt-0.5 shrink-0 text-[var(--warn)]" />
           <div>
-            <div className="text-[14px] font-medium text-[var(--warn)]">{d.status === "failed" ? "This request failed" : "This request needs you"}</div>
-            <p className="mt-1 text-[14px] text-[var(--fg)]">{noteText(d.note) || "Relay could not price this safely. Write the answer on the right."}</p>
+            <div className="text-[14px] font-medium text-[var(--warn)]">{d.status === "failed" ? "This request failed" : "This request is marked"}</div>
+            <p className="mt-1 text-[14px] text-[var(--fg)]">{noteText(d.note) || "Relay could not finish this on its own. Nothing was sent."}</p>
           </div>
         </div>
       )}

@@ -1,6 +1,6 @@
 "use client";
 // Relay v2 Requests: the queue on the left, one request in the middle, its steps and the manual answer on the right.
-// /v2/requests?id=123 opens a request, ?filter=need opens the "Needs you" filter. useSearchParams needs Suspense.
+// /v2/requests?id=123 opens a request, ?filter=need opens the "Marked" filter. useSearchParams needs Suspense.
 import { Suspense, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { motion } from "motion/react";
