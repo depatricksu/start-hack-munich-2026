@@ -76,13 +76,27 @@ def lookalike(sender, known):
         if "@" not in k:
             continue
         kl, kd = k.rsplit("@", 1)
-        same_name = _canon(local) == _canon(kl)
+        cl, ck = _canon(local), _canon(kl)
+        same_name = cl == ck
         numbered = re.sub(r"\d", "", local) == re.sub(r"\d", "", kl)       # buyer1@ and buyer2@ are two mailboxes, not a fake
         if domain == kd and (same_name or (len(kl) >= 8 and not numbered and _distance(local, kl) == 1)):
             return k                                         # nordlicht.audio@ / nordlicht-audi0@ / nordlich-audio@ for nordlicht-audio@
-        if domain != kd and same_name and len(kl) >= 6 and len(kd) >= 8 and (_canon(domain) == _canon(kd) or _distance(domain, kd) <= 2):
-            return k                                         # the same name on hackl00p.mail or hackloop.mall
+        if domain == kd and not numbered and min(len(cl), len(ck)) >= 8 and (ck in cl or cl in ck):
+            return k                                         # kessler-feinmechanik.mail@ / kessler-feinmechanik-new@ (03:03, got one reply)
+        if domain != kd and same_name and len(kl) >= 8:
+            return k                                         # the same name on any other domain: hackl00p.mail, gmail.com
     return None
+
+
+# The same trick by its words, whatever the address looks like: a sender we never quoted says the usual mailbox is gone
+# and wants the offer "to this address instead". A real change of address comes from the address we know.
+ADDRESS_SWITCH = re.compile(
+    r"new (?:e-?mail |mail )?address|switch\w* (?:e-?mail|mail) (?:systems?|providers?|servers?)|"
+    r"(?:old|usual|previous|normal|regular) (?:mailbox|inbox|address|account|e-?mail)[^.\n]{0,40}(?:closed|down|shut|deactivated|hacked|compromised|unavailable|not working|broken)|"
+    r"(?:mailbox|inbox|mail system) (?:is|has been|was) (?:down|closed|hacked)|"
+    r"(?:send|reply|confirm|forward|resend)[^.\n]{0,70}(?:to|at) this (?:address|mailbox|e-?mail|account)|"
+    r"use (?:it|this address|this one|this mailbox) (?:for everything|from now on|going forward|instead)|"
+    r"neue (?:e-?mail|mail)-?adresse|an diese adresse|nouvelle adresse|nuovo indirizzo|nueva direcci[óo]n", re.I)
 
 
 def route(mail, our_address="google@hackloop.mail", customers=None):
@@ -108,6 +122,9 @@ def route(mail, our_address="google@hackloop.mail", customers=None):
         if lookalike(sender, customers):                     # an address that imitates a customer we know: never a reply
             return "spam"
         text = mail["subject"] + "\n" + mail["body"]
+        if customers is not None and sender.lower() not in {c.lower() for c in customers if c} and ADDRESS_SWITCH.search(text) \
+                and not SHIPMENT.search(text) and not mail.get("attachments"):
+            return "spam"                                    # an unknown sender redirecting an offer, with no shipment in it
         if SPAM.search(text) and not FREIGHT.search(text):
             return "spam"
         if PITCH.search(text) and not SHIPMENT.search(text) and not mail.get("attachments"):

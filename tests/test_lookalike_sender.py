@@ -28,6 +28,26 @@ class Lookalike(unittest.TestCase):
                      "nordlicht-audio@hackl00p.mail", "nordlicht-audio@hackloop.mall", "NORDLICHT.AUDIO@hackloop.mail", "lindqvist-rnedtech@hackloop.mail"):
             self.assertIsNotNone(lookalike(fake, KNOWN), fake)
 
+    def test_the_name_with_something_added(self):
+        """Live 03:03: kessler-feinmechanik.mail@ got through the first rule and the clerk asked it for the weight."""
+        for fake in ("kessler-feinmechanik.mail@hackloop.mail", "kessler-feinmechanik-new@hackloop.mail", "office.kessler-feinmechanik@hackloop.mail",
+                     "kessler-feinmech@hackloop.mail", "kessler-feinmechanik@gmail.com", "nordlicht-audio@outlook.com"):
+            self.assertEqual(lookalike(fake, KNOWN), "kessler-feinmechanik@hackloop.mail" if "kessler" in fake else "nordlicht-audio@hackloop.mail", fake)
+        said = ("Hello,\n\nwe are switching mail systems this week and my old mailbox is being closed. Please send your offer for our shipment to "
+                "Lima (LIM) to this address instead, and use it for everything that follows.\n\nJonas Kessler\nKessler Feinmechanik GmbH, Ulm")
+        self.assertEqual(route(mail("kessler-feinmechanik.mail@hackloop.mail", subject="New mail address: offer for Lima (LIM)", body=said), customers=KNOWN), "spam")
+
+    def test_the_words_alone_are_enough_from_a_sender_we_never_quoted(self):
+        said = "Hello,\n\nour usual mailbox has been down since this morning. Could you confirm your price for our shipment to Bangkok to this address?\n\nMira"
+        self.assertEqual(route(mail("mira.p@some-other-firm.com", body=said), customers=KNOWN), "spam")
+        self.assertEqual(route(mail("jonas@elsewhere.org", subject="New mail address", body="Please use this address from now on and send the offer here."), customers=KNOWN), "spam")
+        # a real request that mentions an address is still a request
+        real = "Hello, please quote 300 kg, 1.2 cbm from FRA to JFK and send the offer to this address. Thanks"
+        self.assertEqual(route(mail("buyer@brand-new.com", subject="Quote", body=real), customers=KNOWN), "rfq")
+        # the customer we know may write whatever they like
+        self.assertEqual(route(mail("nordlicht-audio@hackloop.mail", subject="New mail address", body="Our new address is x@y.z, please use it from now on."),
+                               customers=KNOWN), "rfq")
+
     def test_real_and_new_customers_are_not_imitations(self):
         for real in KNOWN + ["nordlicht-audio@HACKLOOP.mail".lower(), "new-customer@hackloop.mail", "nordpol-studio@hackloop.mail", "audio-nordlicht@hackloop.mail",
                              "kessler@other-company.com"]:
