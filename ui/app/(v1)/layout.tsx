@@ -1,6 +1,7 @@
 import { Sidebar } from "@/components/sidebar";
 
-// The first version (glass, sidebar). Kept as it is; the new version lives under /v2.
+// The first version (glass, sidebar). Its start page, requests, shipments and invoices now open Relay v2
+// (redirects in next.config.ts); carriers, workflow, dashboard and score are still served from here.
 export default function V1Layout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-full">
