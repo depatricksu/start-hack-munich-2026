@@ -430,6 +430,8 @@ def finalize(tid):
     body, why = llm.final_reply(s["reply_template"], best, fields, s["customer"], tid)   # llm/: filled + quality gate
     best, body, _ = dg.apply(best, fields, body)            # DG paragraph (and surcharge if DG_MODE=surcharge)
     body = dg.note(fields, body)                             # "priced on your packing list: 1729 kg, not 1210 kg"
+    if fields.get("recall_note"):                            # totals we worked out from an earlier request: say them
+        body = llm._add_expert_note(body, fields["recall_note"], str(best["total"]))
     if ins:                                                  # say what is in the price, before polish adds "not included"
         body = llm._add_expert_note(body, insurance.sentence(ins, llm.reply_lang(fields)), str(best["total"]))
     if cus:
