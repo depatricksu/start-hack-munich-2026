@@ -31,11 +31,29 @@ function splitNote(note: string | null): { code: string | null; text: string } {
   return m ? { code: m[1], text: m[2] } : { code: null, text: note };
 }
 
+// A request with several shipments has no single lane, weight or volume: show every shipment instead of "?".
+function shipments(f: Session["fields"]) {
+  return Array.isArray(f.shipments) && f.shipments.length > 1 ? f.shipments : [];
+}
+
+function total(f: Session["fields"], key: "weight_kg" | "volume_cbm", unit: string): string {
+  const parts = shipments(f).map((x) => Number(x[key]) || 0);
+  if (parts.length && parts.every((p) => p > 0)) {
+    const sum = Math.round(parts.reduce((a, b) => a + b, 0) * 100) / 100;
+    return `${sum} ${unit} (${parts.join(" + ")})`;
+  }
+  return f[key] != null ? `${f[key]} ${unit}` : "?";
+}
+
 function Route({ s }: { s: Session }) {
   const f = s.fields;
+  const many = shipments(f);
+  const origins = many.map((x) => x.origin).filter((o, i, all): o is string => !!o && all.indexOf(o) === i);
+  const origin = origins.length ? origins.join(" / ") : f.origin;
+  const destination = many.length ? many.map((x) => x.destination ?? "?").join(" + ") : f.destination;
   return (
     <span className="num font-semibold">
-      {f.origin ?? "???"} <span className="text-zinc-400">→</span> {f.destination ?? "???"}
+      {origin ?? "???"} <span className="text-zinc-400">→</span> {destination ?? "???"}
     </span>
   );
 }
@@ -188,7 +206,7 @@ function Detail({ d }: { d: SessionDetail }) {
       )}
 
       <div className="grid grid-cols-4 gap-3">
-        {[["Weight", f.weight_kg != null ? `${f.weight_kg} kg` : "?"], ["Volume", f.volume_cbm != null ? `${f.volume_cbm} cbm` : "?"],
+        {[["Weight", total(f, "weight_kg", "kg")], ["Volume", total(f, "volume_cbm", "cbm")],
           ["Wants", f.prefer ?? "cheapest"], ["Language", LANG_FLAG[lang] ?? (lang ? lang.toUpperCase() : "?")]].map(([k, v]) => (
           <div key={k} className="rounded-xl border border-zinc-200 bg-white p-3">
             <div className="text-xs uppercase tracking-wide text-zinc-400">{k}</div>

@@ -500,9 +500,12 @@ def after_booking(s, mail):
     text = own_text(mail["body"], mail.get("subject"))
     if AUTO_REPLY.search(text):
         return db.event("after_booking_auto_reply", tid, mail["id"])
-    from booking import invoice
-    if invoice.on_customer_mail(s, mail, text):                  # "we have paid" / "please send the invoice again"
-        return None
+    try:                                                         # an extra: it must never stand in front of a cancellation
+        from booking import invoice
+        if invoice.on_customer_mail(s, mail, text):              # "we have paid" / "please send the invoice again"
+            return None
+    except Exception as e:
+        db.event("invoice_error", tid, mail["id"], error=str(e))
     kind = next((k for k, rx in POST_BOOKING if rx.search(text)), None)
     if not kind and STATUS_Q.search(text):                       # "where is my shipment?": answer from the booking, like tracking
         from booking import tracking
