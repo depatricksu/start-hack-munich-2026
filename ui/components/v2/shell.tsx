@@ -7,6 +7,7 @@ import { ReactNode } from "react";
 import { MotionConfig, motion } from "motion/react";
 import { RelayMark } from "@/components/logo";
 import { EASE, SPRING, ago, useJson, useNow } from "@/components/v2/ui";
+import { Notifications } from "@/components/notifications";
 import type { Session } from "@/lib/types";
 
 const NAV = [
@@ -72,7 +73,7 @@ export function Shell({ children }: { children: ReactNode }) {
           </nav>
           <span className="flex-1" />
           <Status />
-          <Link href="/dashboard" className="text-[12px] text-[var(--fg-3)] transition-colors hover:text-[var(--fg-2)]">Classic view</Link>
+          <Notifications inline />
         </header>
         {/* Each screen fades and rises in a little when you switch to it. */}
         <motion.main key={path} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, ease: EASE }}
