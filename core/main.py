@@ -13,7 +13,7 @@ from . import attachments, config, db, mailbox, safety, offer_file
 from router.route import route
 from llm import extract as llm
 from pricing import price as sheets, insurance, customs
-from sourcing import portal
+from sourcing import portal, portal_page
 from actions import queue as actions            # take-over queue: sends human replies typed in the UI
 from shared.rfq import gate as rfq_gate
 from pricing import multi, tariff_mail
@@ -170,6 +170,11 @@ def price_and_quote(tid, mail, fields, asked=False):
     pending = bids.request(db.session(tid), fields)          # mails to carriers/truckers
     if pending:
         db.update_session(tid, status="waiting_bids")
+        if getattr(portal, "LAST_DOWN", False):              # rate API 503: its airlines' prices are only on the portal page
+            try:
+                portal_page.hold(tid, mail["id"], options)   # wait for a person's rate instead of quoting blind
+            except Exception as e:                           # the hold is an extra: never lose the quote over it
+                db.event("error", tid, mail["id"], error="portal_page.hold: %s" % e)
         return db.event("waiting_bids", tid, mail["id"], pending=pending, wait_s=config.BID_WAIT_S)
     if postcode:                                             # door pickup but nobody to ask
         return needs_human(tid, mail, "door_pickup: no trucker serves postcode zone %s" % postcode[:2])

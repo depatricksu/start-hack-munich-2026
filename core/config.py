@@ -64,6 +64,10 @@ SHARE_EVERY_S = float(os.environ.get("SHARE_EVERY_S", "900"))
 # 1 = the gateway call also gets the text of the customer's attachments (core/attachments.py). Off until one real
 # request with an attachment was tried with the real gateway in DRY_RUN: it changes what the model reads.
 ATTACH_LLM = os.environ.get("ATTACH_LLM", "0") == "1"
+# 5U turned the rate API off for 50 minutes (22 Nov 01:15): the portal airlines' prices were then only on the portal's
+# web page, read by a person (sourcing/portal_page.py). The quote waits this long after arrival for that rate, then
+# goes out with what we have. A request expires at 360 s.
+PORTAL_DOWN_HOLD_S = float(os.environ.get("PORTAL_DOWN_HOLD_S", "285"))
 # An RFQ older than this is dead (expires after 6 min). We do not answer it, e.g. after a restart.
 RFQ_MAX_AGE_S = float(os.environ.get("RFQ_MAX_AGE_S", "330"))
 CLARIFY = os.environ.get("CLARIFY", "1") == "1"     # ask the customer when only data is missing (Erik, 21 Nov)

@@ -1,95 +1,86 @@
-"""5U turned the portal rate API off (503). We must fall back to email bids. Run: python -m unittest tests.test_portal_down"""
-import os, tempfile, unittest
-os.environ.setdefault("DB_PATH", os.path.join(tempfile.mkdtemp(), "t.db"))
-os.environ.setdefault("DRY_RUN", "1"); os.environ.setdefault("LLM_FAKE", "1"); os.environ.setdefault("FIVEU_API_KEY", "")
-from sourcing import portal, bids  # noqa: E402
-from core import db  # noqa: E402
+"""5U, 22 Nov 01:15 to 02:08: the rate API answered 503 and only the portal's web page had the portal airlines'
+prices. The clerk now holds the quote and takes a rate a person read on that page (sourcing/portal_page.py)."""
+import json, os, tempfile, time, unittest
+
+os.environ["DB_PATH"] = os.path.join(tempfile.mkdtemp(), "test.db")
+os.environ["DRY_RUN"], os.environ["LLM_FAKE"], os.environ["FIVEU_API_KEY"] = "1", "1", ""
+
+from core import config, db  # noqa: E402
+from sourcing import portal, portal_page  # noqa: E402
 
 
-class TestPortalDownTriggersBids(unittest.TestCase):
-    def test_503_sets_last_down(self):
-        portal.LAST_DOWN = False
-        # simulate a 503 read
-        import sourcing.portal as P
-        orig = P.mailbox.api
-        P.mailbox.api = lambda *a, **k: (503, {"detail": "rate API unavailable"})
-        try:
-            P.options("HAM", "EZE", 500, 2) if P.config.API_KEY else P._rate("HAM", "EZE", "MD", 500, 2)
-            P._rate("HAM", "EZE", "MD", 500, 2)
-        finally:
-            P.mailbox.api = orig
-        self.assertTrue(portal.LAST_DOWN)
-
-    def test_request_asks_airlines_when_portal_down_even_with_sheet_options(self):
-        import random
-        tid = random.randint(880000, 889999)          # unique: the suite shares one DB
-        db.con().execute("DELETE FROM bids WHERE thread_id=?", (tid,))
-        db.con().execute("INSERT OR REPLACE INTO sessions(thread_id,customer,status,fields,options,received_at) VALUES(?,?,?,?,?,?)",
-                         (tid, "c@x.mail", "new", '{"origin":"HAM","destination":"EZE","weight_kg_total":500}',
-                          '[{"airline":"Wayzata Air Cargo","total_eur":"2000","transit_days":6,"source":"sheet"}]', 1.0))
-        orig = bids.serving                           # independent of the carrier-list file / DB state
-        bids.serving = lambda role, key: ([{"name": "Tamarind Airways", "email": "tamarind-airways@hackloop.mail"}] if role == "airline" else [])
-        portal.LAST_DOWN = True                       # portal is down this round
-        try:
-            pending = bids.request({"thread_id": tid}, {"origin": "HAM", "destination": "EZE", "weight_kg_total": 500, "pickup_postcode": None})
-        finally:
-            bids.serving = orig
-        asked = [b for b in bids.rows(tid) if b["role"] in ("airline", "ratedesk")]
-        self.assertGreater(len(asked), 0)             # we asked airlines + rate desk despite having a sheet option
-        self.assertGreater(pending, 0)
+def session(tid, fields, options, received=None):
+    mail = {"id": tid, "thread_id": tid, "sender": "mira@customer.mail", "subject": "Air freight quote", "body": "x",
+            "received_at": received or time.time(), "raw": {}}
+    db.save_mail(mail)
+    db.new_session(mail)
+    db.update_session(tid, fields=fields, options=options, status="waiting_bids")
+    return mail
 
 
-class TestBidsUsedWhenSheetsExist(unittest.TestCase):
-    def test_fast_bid_beats_slow_sheet(self):
-        import random, json, time
-        tid = random.randint(890000, 899999)
-        db.con().execute("INSERT OR REPLACE INTO sessions(thread_id,customer,status,fields,options,received_at) VALUES(?,?,?,?,?,?)",
-                         (tid, "c@x.mail", "waiting_bids", json.dumps({"origin": "HAM", "destination": "EZE", "weight_kg_total": 500, "prefer": "fastest"}),
-                          json.dumps([{"airline": "Wayzata Air Cargo", "total": "2000", "total_eur": "2000", "currency": "EUR", "transit_days": 6, "source": "sheet"}]), time.time()))
-        bids.ensure()
-        db.con().execute("INSERT INTO bids(thread_id,carrier,kind,email,role,required,status,requested_at,replied_at,total,currency,transit_days,total_eur) "
-                         "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (tid, "Meridian Freightways", "airline", "m@x", "airline", 1, "ok", time.time(), time.time(), "2400", "EUR", 3, "2400"))
-        opts = bids.final_options(tid, json.loads(db.session(tid)["options"]))
-        self.assertIn("Meridian Freightways", [o["airline"] for o in opts])
-        best = min(opts, key=lambda x: (x["transit_days"], float(x["total_eur"])))
-        self.assertEqual(best["airline"], "Meridian Freightways")
+class PortalDown(unittest.TestCase):
+    def setUp(self):
+        self.lanes = dict(portal.LANES)
+        portal.LANES.clear()
+        portal.LANES[("HAM", "YYZ")] = [{"code": "BX", "name": "Borealis Freight Airways"}, {"code": "JP", "name": "Juniper Cargo Lines"}]
+        portal.LANES[("HAM", "MEX")] = [{"code": "RV", "name": "Riverbend Airlines Cargo"}]
 
+    def tearDown(self):
+        portal.LANES.clear()
+        portal.LANES.update(self.lanes)
 
-    def test_cheaper_bid_from_an_airline_we_already_priced_wins(self):
-        """Round 33 (19:15 change): the winners booked Borealis, which we had from the portal at a higher price.
-        The mailed Borealis price must compete with the portal one, not be skipped (Kai's review point 3)."""
-        import random, json, time
-        tid = random.randint(900000, 909999)
-        db.con().execute("INSERT OR REPLACE INTO sessions(thread_id,customer,status,fields,options,received_at) VALUES(?,?,?,?,?,?)",
-                         (tid, "c@x.mail", "waiting_bids", json.dumps({"origin": "FRA", "destination": "ORD", "weight_kg_total": 500, "prefer": "cheapest"}),
-                          json.dumps([{"airline": "Borealis Freight Airways", "total": "2000", "total_eur": "2000", "currency": "EUR", "transit_days": 3, "source": "portal"}]), time.time()))
-        bids.ensure()
-        db.con().execute("INSERT INTO bids(thread_id,carrier,kind,email,role,required,status,requested_at,replied_at,total,currency,transit_days,total_eur) "
-                         "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", (tid, "Borealis Freight Airways", "airline", "b@x", "airline", 1, "ok", time.time(), time.time(), "1700", "EUR", 3, "1700"))
-        opts = bids.final_options(tid, json.loads(db.session(tid)["options"]))
-        best = min(opts, key=lambda x: float(x["total_eur"]))
-        self.assertEqual((best["airline"], best["total_eur"], best["source"]), ("Borealis Freight Airways", "1700", "bid"))
+    def test_the_quote_is_held_and_says_what_to_look_up(self):
+        f = {"origin": "HAM", "destination": "YYZ", "weight_kg_total": 81.0, "volume_cbm_total": 0.67, "prefer": "fastest"}
+        mail = session(920001, f, [])
+        self.assertTrue(portal_page.hold(920001, mail["id"], []))
+        s = db.session(920001)
+        self.assertAlmostEqual(s["deadline"], s["received_at"] + config.PORTAL_DOWN_HOLD_S, places=1)
+        self.assertIn("RATE PORTAL DOWN", s["note"])
+        for part in ("BX (Borealis Freight Airways", "JP (Juniper Cargo Lines", "HAM to YYZ", "81 kg", "0.67 cbm", "start-hack.5u.ai/portal/ui"):
+            self.assertIn(part, s["note"])
+
+    def test_a_rate_read_by_a_person_becomes_an_option_and_releases_the_quote(self):
+        """Round 100, live: Borealis 645.60 EUR, 1 day, read on the page at 02:04; quoted, accepted, booked with the rate_id."""
+        f = {"origin": "HAM", "destination": "YYZ", "weight_kg_total": 81.0, "volume_cbm_total": 0.67, "prefer": "fastest"}
+        mail = session(920002, f, [])
+        portal_page.hold(920002, mail["id"], [])
+        opt = portal_page.add(920002, "bx", "645.6", 1, "R-CN-Uk_5BeqIhb2d4")
+        self.assertEqual((opt["airline"], opt["airline_code"], opt["total_eur"], opt["transit_days"], opt["source"], opt["rate_id"]),
+                         ("Borealis Freight Airways", "BX", "645.60", 1, "portal page", "R-CN-Uk_5BeqIhb2d4"))
+        s = db.session(920002)
+        self.assertLessEqual(s["deadline"], time.time())                       # the clerk quotes on its next tick
+        self.assertEqual([o["airline"] for o in json.loads(s["options"])], ["Borealis Freight Airways"])
+        portal_page.add(920002, "Borealis Freight Airways", "640.00", 1)      # read again: replaces, never doubles
+        self.assertEqual([o["total_eur"] for o in json.loads(db.session(920002)["options"])], ["640.00"])
+        self.assertEqual(portal_page.known_days("HAM", "YYZ"), {"Borealis Freight Airways": 1})
+
+    def test_no_hold_when_no_portal_airline_can_be_the_answer(self):
+        f = {"origin": "FRA", "destination": "ORD", "weight_kg_total": 1076.0, "volume_cbm_total": 4.83, "prefer": "fastest"}
+        mail = session(920003, f, [])
+        before = db.session(920003)["deadline"]
+        self.assertFalse(portal_page.hold(920003, mail["id"], [{"airline": "Orion Cargo Air", "transit_days": 2, "total_eur": "2334.92"}]))   # no portal airline on the lane
+        self.assertEqual(db.session(920003)["deadline"], before)
+        # fastest wanted, and the only portal airline on the lane is known to be slower than a sheet airline
+        db.event("options", 920004, options=[{"airline": "Riverbend Airlines Cargo", "origin": "HAM", "destination": "MEX", "transit_days": 4, "source": "portal"}])
+        f = {"origin": "HAM", "destination": "MEX", "weight_kg_total": 500.0, "volume_cbm_total": 1.0, "prefer": "fastest"}
+        mail = session(920004, f, [])
+        self.assertFalse(portal_page.hold(920004, mail["id"], [{"airline": "Yellowtail Air Freight", "transit_days": 3, "total_eur": "1500.00"}]))
+        self.assertTrue(portal_page.hold(920004, mail["id"], [{"airline": "Yellowtail Air Freight", "transit_days": 5, "total_eur": "1500.00"}]))
+
+    def test_too_late_is_refused(self):
+        f = {"origin": "HAM", "destination": "YYZ", "weight_kg_total": 81.0, "volume_cbm_total": 0.67}
+        session(920005, f, [])
+        db.update_session(920005, status="quoted")
+        with self.assertRaises(SystemExit):
+            portal_page.add(920005, "BX", "645.60", 1)
+
+    def test_release_without_a_rate(self):
+        f = {"origin": "HAM", "destination": "YYZ", "weight_kg_total": 81.0, "volume_cbm_total": 0.67, "prefer": "fastest"}
+        mail = session(920006, f, [])
+        portal_page.hold(920006, mail["id"], [])
+        portal_page.go(920006)
+        self.assertLessEqual(db.session(920006)["deadline"], time.time())
 
 
 if __name__ == "__main__":
     unittest.main()
-
-
-class TestExcludedAirline(unittest.TestCase):
-    """Round 42 (20:09): 'Please do not offer Zephyr Steppe Cargo (ZS)'. On a lane priced by bids only, the pick must
-    skip the excluded airline and take the next one, not pick it and end with no option."""
-    def test_excluded_airline_is_never_picked_on_a_bid_only_lane(self):
-        import random, json, time
-        tid, cust = random.randint(910000, 919999), "meyer%d@x.mail" % random.randint(1, 10**6)
-        db.con().execute("INSERT INTO mails(id,thread_id,sender,subject,body,received_at) VALUES(?,?,?,?,?,?)",
-                         (tid, tid, cust, "Quote to ULN", "Cheapest option to ULN please.\n\nPlease do not offer Zephyr Steppe Cargo (ZS) "
-                          "for this shipment or for any of our future inquiries.\n\nBest regards", time.time()))
-        db.con().execute("INSERT OR REPLACE INTO sessions(thread_id,customer,status,fields,options,received_at) VALUES(?,?,?,?,?,?)",
-                         (tid, cust, "waiting_bids", json.dumps({"origin": "FRA", "destination": "ULN", "weight_kg_total": 911, "prefer": "cheapest"}), "[]", time.time()))
-        bids.ensure()
-        for name, total in (("Zephyr Steppe Cargo", "1000"), ("Lagoon Isles Airways", "3210"), ("Pampero Air Cargo", "3780")):
-            db.con().execute("INSERT INTO bids(thread_id,carrier,kind,email,role,required,status,requested_at,replied_at,total,currency,transit_days,hours,total_eur) "
-                             "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (tid, name, "airline", "b@x", "airline", 1, "ok", time.time(), time.time(), total, "EUR", 3, 72, total))
-        opts = bids.final_options(tid, [])
-        self.assertNotIn("Zephyr Steppe Cargo", [x["airline"] for x in opts])
-        self.assertEqual(min(opts, key=lambda x: float(x["total_eur"]))["airline"], "Lagoon Isles Airways")
