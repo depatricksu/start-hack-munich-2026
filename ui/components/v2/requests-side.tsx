@@ -29,8 +29,10 @@ function TimeToQuote({ d }: { d: SessionDetail }) {
 // Where a request stands, for the bar and the mark next to the line. Relay is still working on it (moving dots),
 // it waits for the customer (clock), Relay stopped on it (warning mark), or it is done (tick).
 const WORKING: Record<string, number> = { new: 18, waiting_bids: 46, sending: 78, booking: 88, booking_requested: 88 };
-const WAITING: Record<string, number> = { asked_customer: 30, awaiting_docs: 92 };
-const STOPPED: Record<string, number> = { needs_human: 60, failed: 50, expired: 50 };
+// "quoted" is not in WAITING on purpose: the quote is out, which is the step this line reports (tick, as in the
+// first version). The states after it that wait for the customer's word do show the clock.
+const WAITING: Record<string, number> = { asked_customer: 30, awaiting_docs: 92, meeting_proposed: 100, reprice_proposed: 100, cancel_pending: 100 };
+const STOPPED: Record<string, number> = { needs_human: 60, failed: 50, expired: 50, cancelled_by_airline: 100 };
 
 // What happened, the way the first version showed it: ONE line that changes as the request moves on, four moving
 // dots while Relay is still working on it, a tick when it is done. The earlier steps open on demand.
