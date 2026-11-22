@@ -89,9 +89,12 @@ export function Stepper({ d }: { d: ShipmentDetail }) {
     <div>
       <div className="mb-3 grid gap-x-0" style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }}>
         <div className="eyebrow" style={{ gridColumn: `span ${nReal}` }}>From our mails and events</div>
-        <div className="eyebrow border-l border-dashed border-[var(--hair-2)] pl-3" style={{ gridColumn: `span ${steps.length - nReal}` }}>
-          Estimated, no flight feed
-        </div>
+        {/* Only when some flight steps are still estimates; once carriers reported them, everything is real. */}
+        {steps.length > nReal && (
+          <div className="eyebrow border-l border-dashed border-[var(--hair-2)] pl-3" style={{ gridColumn: `span ${steps.length - nReal}` }}>
+            Estimated, no flight feed
+          </div>
+        )}
       </div>
       <motion.ol initial="hidden" animate="show" variants={{ hidden: {}, show: { transition: { staggerChildren: 0.05 } } }}
         className="grid" style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }}>

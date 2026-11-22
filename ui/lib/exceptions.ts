@@ -62,8 +62,13 @@ export function getExceptions(now = Date.now() / 1000): OffTrack[] {
 
   // 3. A carrier wrote that something went wrong (delay, cancellation, rebooking) in the last few days.
   const carriers = getCarriers(now);
+  // A delay is no longer a problem once the same shipment arrived or was delivered after it.
+  const landed = new Map<number, number>();
+  for (const u of carriers.updates)
+    if (u.thread != null && (u.type === "arrived" || u.type === "delivered")) landed.set(u.thread, Math.max(landed.get(u.thread) ?? 0, u.ts));
   for (const u of carriers.updates) {
     if (u.from !== "carrier" || !["delayed", "cancelled", "rebooked"].includes(u.type)) continue;
+    if (u.thread != null && (landed.get(u.thread) ?? 0) >= u.ts) continue;
     if (now - u.ts > CARRIER_NEWS_DAYS * 86400) continue;
     out.push({
       id: `carrier-${u.id}`, kind: "carrier", tone: u.type === "rebooked" ? "warn" : "bad",

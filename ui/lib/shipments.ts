@@ -213,11 +213,30 @@ function steps(c: Ctx, yesAt: number | null): Step[] {
   const t0 = Number(b.confirmed_at ?? b.booked_at ?? b.created_at ?? 0);
   const marks = simMarks(t0, b.transit_days == null ? null : Number(b.transit_days));
   const fly = status === "confirmed";
-  out.push(
-    { key: "departed", label: "Departed", done: fly && c.now >= marks[2], at: fly ? marks[2] : null, sim: true },
-    { key: "arrived", label: "Arrived", done: fly && c.now >= marks[3], at: fly ? marks[3] : null, sim: true },
-    { key: "delivered", label: "Delivered", done: fly && c.now >= marks[4], at: fly ? marks[4] : null, sim: true },
-  );
+  // A carrier mail that says departed / arrived / delivered (carrierops' shipment_updates) beats the estimate:
+  // that step is real from then on, with the time of the mail.
+  const seen = carrierMilestones(Number(b.thread_id));
+  const flight = (key: string, label: string, mark: number): Step => seen[key] != null
+    ? { key, label, done: true, at: seen[key] }
+    : { key, label, done: fly && c.now >= mark, at: fly ? mark : null, sim: true };
+  out.push(flight("departed", "Departed", marks[2]), flight("arrived", "Arrived", marks[3]), flight("delivered", "Delivered", marks[4]));
+  // With every flight step reported by the carriers, show the money last, in the order it happens.
+  if (!out.some((x) => x.sim)) out.push(...out.splice(out.findIndex((x) => x.key === "paid"), 1));
+  return out;
+}
+
+// First time a carrier reported each flight milestone for this shipment. Empty when carrierops has not run.
+function carrierMilestones(thread: number): Record<string, number> {
+  const db = getDb();
+  const out: Record<string, number> = {};
+  if (!db || !thread) return out;
+  try {
+    const rows = db.prepare("SELECT type, MIN(at) AS at FROM shipment_updates WHERE thread_id=? AND type IN ('departed','arrived','delivered') GROUP BY type")
+      .all(thread) as { type: string; at: number }[];
+    for (const r of rows) out[r.type] = Number(r.at);
+    if (out.delivered != null) { out.arrived ??= out.delivered; out.departed ??= out.arrived; }
+    else if (out.arrived != null) out.departed ??= out.arrived;
+  } catch { /* no shipment_updates table: estimates only */ }
   return out;
 }
 
