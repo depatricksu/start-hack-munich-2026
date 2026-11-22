@@ -287,9 +287,20 @@ def _session_view(s):
                 transit_days=c.get("transit_days"), thread_id=s["thread_id"], customer=s["customer"]), f.get("language") or "en"
 
 
+# "Another forwarder quoted 7 percent less for the same shipment. Could you match their rate?" asks us to drop OUR price
+# for the SAME service. 5U scores holding the price with +10 (rounds 107, 108, 132, 144, 157, 166) and a lower offer with
+# -15: round 175, 22 Nov 09:40, a 'fastest' request, we answered with a cheaper flight that is a day slower.
+PRICE_MATCH = re.compile(r"\b(?:(?:another|other|different|competing|rival) (?:freight )?(?:forwarder|agent|provider|company|quote|offer)|"
+                         r"competitor\w*|match (?:their|the|this|that|its) (?:rate|price|offer|quote)|beat (?:their|the|this|that) "
+                         r"(?:rate|price|offer|quote)|\d+(?:[.,]\d+)?\s*(?:percent|%|prozent) (?:less|lower|cheaper|below|weniger|"
+                         r"g[üu]nstiger|billiger)|andere[rn]? spediteur\w*|wettbewerb\w*|mitbewerb\w*)", re.I)
+
+
 def handle_better_price(s, mail):
     """Customer wants a better price. Cheapest first, a call only when it is worth the forwarder's time:
-    1. we have a cheaper option for this lane (e.g. we quoted 'fastest') -> offer it by mail, status stays quoted
+    1. they ask for something cheaper and we have a cheaper option for this lane (e.g. we quoted 'fastest')
+                                                                       -> offer it by mail, status stays quoted
+       NOT when they ask us to match a competitor (PRICE_MATCH): that is the same service for less, we hold the price
     2. shipment is big enough (quote >= MEETING_MIN_EUR)                -> offer 3 call slots with our forwarder
     3. small shipment, already our best rate                           -> polite mail: this is our best rate, still valid
     """
@@ -298,6 +309,9 @@ def handle_better_price(s, mail):
     chosen, options = json.loads(s["chosen"] or "{}"), json.loads(s["options"] or "[]")
     eur = lambda o: Decimal(str(o.get("total_eur") or o.get("total") or "0"))
     cheaper = sorted((o for o in options if eur(o) < eur(chosen)), key=eur)
+    if cheaper and PRICE_MATCH.search(own_text(mail["body"], mail.get("subject"))):
+        db.event("price_match_held", tid, mail["id"], total=chosen.get("total"), cheaper_not_offered=cheaper[0].get("total"))
+        cheaper = []
     if cheaper:
         alt = cheaper[0]
         body = _write("cheaper_option", lang, view, {"ALT_AIRLINE": alt["airline"], "ALT_TRANSIT": alt.get("transit_days"),

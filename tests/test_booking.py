@@ -116,6 +116,33 @@ class TestOutcomes(unittest.TestCase):
         answer(tid, 2, "Great, book it.")                     # books the cheaper one
         self.assertEqual(crm.get(tid)["airline"], "Cobalt Skylift")
 
+    def test_match_a_competitor_on_a_fastest_quote_holds_the_price(self):
+        """5U, 22 Nov 09:40 (round 175): fastest quoted, 'Another forwarder quoted 7 percent less for the same shipment.
+        Could you match their rate?' -> we offered a cheaper flight a day slower and booked it: adjustment -15, not +10."""
+        tid = 4150
+        quote(tid, rfq=RFQ.replace("Cheapest", "Fastest"))    # fastest quoted: Yellowtail 514.80; Cobalt 432.00 is cheaper
+        answer(tid, 1, "Thanks for the offer. It works for us, and I\u2019d like to place the shipment with you. Another forwarder quoted "
+                       "7 percent less for the same shipment. Could you match their rate?")
+        s = db.session(tid)
+        self.assertEqual(s["status"], "quoted")
+        self.assertIn("Yellowtail", json.loads(s["chosen"])["airline"])           # the offer is unchanged
+        body = sent(tid)[-1]["body"]
+        self.assertNotIn("Cobalt", body)
+        self.assertNotIn("432.00", body)
+        self.assertIn("514.80 EUR", body)                                         # "this is our best rate"
+        answer(tid, 2, "Could you confirm by email whether your price stays as offered? If it\u2019s changed, please send the new all-in total.")
+        self.assertIn("our price stays as offered: 514.80 EUR", sent(tid)[-1]["body"])
+        answer(tid, 3, "That\u2019s fine, we accept your offer. Please book the shipment now.")
+        self.assertIn("Yellowtail", crm.get(tid)["airline"])                      # booked as quoted, the fastest
+
+    def test_match_wordings(self):
+        for said in ("Another forwarder has quoted 9 percent less for the same shipment. Can you match their rate?",
+                     "A competitor offers this 5% cheaper.", "Could you beat their price?", "We have a different quote that is 120 EUR lower, can you match the price?",
+                     "Ein anderer Spediteur ist 7 Prozent günstiger. Können Sie da mitgehen?"):
+            self.assertTrue(handlers.PRICE_MATCH.search(said), said)
+        for said in ("Hmm, is there something cheaper?", "Too expensive for us. Can you do a better price?", "Do you have a slower, cheaper option?"):
+            self.assertFalse(handlers.PRICE_MATCH.search(said), said)
+
     def test_better_price_big_shipment_offers_meeting_in_customer_time(self):
         tid = 4200
         quote(tid, sender="joe@buyer-example.us")
