@@ -133,6 +133,19 @@ class TestOutcomes(unittest.TestCase):
         self.assertEqual(db.session(tid)["status"], "needs_human")
         self.assertIsNone(crm.get(tid))
 
+    def test_plain_acceptance_after_the_call_offer_is_booked(self):
+        """5U, 22 Nov 02:46 (round 107): 'can you match 7 percent less?' -> we kept the price and offered a call ->
+        'That works for us, and we accept your offer. Please book the shipment now.' was parked, nothing was booked."""
+        tid = 4250
+        quote(tid)
+        with mock.patch.object(handlers, "MEETING_MIN_EUR", handlers.Decimal("100")):
+            answer(tid, 1, "Thanks for the offer. It looks good. Another forwarder has quoted 7 percent less for the same shipment. Can you match their rate?")
+        self.assertEqual(db.session(tid)["status"], "meeting_proposed")
+        self.assertIsNone(crm.get(tid))
+        answer(tid, 2, "That works for us, and we accept your offer. Please book the shipment now.")
+        self.assertIsNotNone(crm.get(tid))                    # booked at the quoted price, no call needed
+        self.assertNotEqual(db.session(tid)["status"], "needs_human")
+
     def test_unclear_goes_to_human(self):
         tid = 5000
         quote(tid)
