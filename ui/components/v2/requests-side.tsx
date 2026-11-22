@@ -3,7 +3,7 @@
 // Keyed on thread_id by the page, so local state (open/closed, draft) starts fresh for each request.
 import { useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Check, ChevronDown, PenLine } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, Clock, PenLine } from "lucide-react";
 import { EASE, Skeleton, StatusBadge, clock, useNow } from "@/components/v2/ui";
 import { groupOf, span, timeline } from "@/components/v2/requests-data";
 import type { SessionDetail } from "@/lib/types";
@@ -26,8 +26,11 @@ function TimeToQuote({ d }: { d: SessionDetail }) {
   );
 }
 
-// A request is still being worked on in these states; everything else is done (or waiting for the customer).
+// Where a request stands, for the bar and the mark next to the line. Relay is still working on it (moving dots),
+// it waits for the customer (clock), Relay stopped on it (warning mark), or it is done (tick).
 const WORKING: Record<string, number> = { new: 18, waiting_bids: 46, sending: 78, booking: 88, booking_requested: 88 };
+const WAITING: Record<string, number> = { asked_customer: 30, awaiting_docs: 92 };
+const STOPPED: Record<string, number> = { needs_human: 60, failed: 50, expired: 50 };
 
 // What happened, the way the first version showed it: ONE line that changes as the request moves on, four moving
 // dots while Relay is still working on it, a tick when it is done. The earlier steps open on demand.
@@ -36,19 +39,21 @@ function Progress({ d }: { d: SessionDetail }) {
   const [open, setOpen] = useState(false);
   const last = steps[steps.length - 1];
   if (!last) return <p className="text-[13px] text-[var(--fg-2)]">No steps logged yet.</p>;
-  const working = d.status in WORKING;
+  const working = d.status in WORKING, waiting = d.status in WAITING, stopped = d.status in STOPPED;
+  const pct = WORKING[d.status] ?? WAITING[d.status] ?? STOPPED[d.status] ?? 100;
   const earlier = steps.slice(0, -1).reverse(); // newest first
   return (
     <div>
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
-        <motion.div className="h-full rounded-full bg-[var(--fg)]" initial={false}
-          animate={{ width: `${WORKING[d.status] ?? 100}%`, opacity: working ? [0.75, 1, 0.75] : 1 }}
+        <motion.div className={`h-full rounded-full ${stopped ? "bg-[var(--warn)]" : "bg-[var(--fg)]"}`} initial={false}
+          animate={{ width: `${pct}%`, opacity: working ? [0.75, 1, 0.75] : 1 }}
           transition={{ width: { type: "spring", stiffness: 120, damping: 22 }, opacity: working ? { duration: 2.4, repeat: Infinity } : { duration: 0.2 } }} />
       </div>
       <div className="mt-4 flex items-start gap-3">
         <span className="mt-0.5 flex h-5 w-6 shrink-0 items-center justify-center">
-          {working
-            ? <span className="load-dots"><i /><i /><i /><i /></span>
+          {working ? <span className="load-dots"><i /><i /><i /><i /></span>
+            : stopped ? <AlertTriangle size={16} className="text-[var(--warn)]" aria-label="Relay stopped on this request" />
+            : waiting ? <Clock size={16} className="text-[var(--fg-2)]" aria-label="Waiting for the customer" />
             : <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[var(--fg)] text-[#0a0a0a]"><Check size={11} strokeWidth={3} /></span>}
         </span>
         <div className="min-w-0 flex-1">

@@ -94,7 +94,9 @@ export function getNotifications(now = Date.now() / 1000): Notice[] {
     FROM sessions s WHERE s.status IN ('needs_human','failed','expired')`);
   for (const s of open) {
     const ts = Number(s.since ?? s.received_at), thread = Number(s.thread_id), note = String(s.note ?? "");
-    if (ts <= since || (alerted.has(thread) && note.startsWith("AIRLINE CANCELLED"))) continue;
+    // A marked or failed request stays in the bell until it is resolved, however old: the bell is the only place
+    // on the top bar that shows it. A missed request can never be resolved, so that one leaves after 24 hours.
+    if ((s.status === "expired" && ts <= since) || (alerted.has(thread) && note.startsWith("AIRLINE CANCELLED"))) continue;
     const missed = s.status === "expired", failed = s.status === "failed" || note.startsWith("error:");
     out.push({
       id: `status-${thread}-${s.status}-${Math.floor(ts)}`, ts, severity: missed || failed ? "critical" : "warning",
