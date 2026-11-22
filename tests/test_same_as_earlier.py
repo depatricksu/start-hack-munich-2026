@@ -7,7 +7,7 @@ os.environ["DRY_RUN"], os.environ["LLM_FAKE"], os.environ["FIVEU_API_KEY"] = "1"
 
 from core import db, main, recall  # noqa: E402
 
-ANNA = "sonnberg-roesterei@hackloop.mail"
+ANNA = "anna@recall-test.mail"            # not a customer of any other test: all tests share one DB
 T_MEL = calendar.timegm((2026, 11, 21, 23, 18, 53))
 REAL = ("Hello,\n\nCould you please quote the same shipment as in my earlier request, \"Air freight quote request: STR to MEL\", sent on "
         "2026-11-21 at 23:18 UTC for destination MEL? The cargo and pickup details are unchanged, and you already have them from that request."
@@ -19,7 +19,7 @@ def earlier(tid, sender, subject, received, **fields):
     mail = {"id": tid, "thread_id": tid, "sender": sender, "subject": subject, "body": "x", "received_at": received, "raw": {}}
     db.save_mail(mail)
     db.new_session(mail)
-    db.update_session(tid, fields=fields, status="confirmed")
+    db.update_session(tid, fields=fields, status="lost")     # not a booking: the tracking tests must not see these
 
 
 def new_mail(tid, body, sender=ANNA, subject="Air freight quote request to LAX"):
