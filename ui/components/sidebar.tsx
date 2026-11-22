@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { motion } from "motion/react";
-import { Inbox, LayoutGrid, MessageSquare, Package, Plane, Receipt, User, Workflow, X } from "lucide-react";
+import { Inbox, LayoutGrid, MessageSquare, Package, Plane, Receipt, User, X } from "lucide-react";
 import { RelayMark, SidebarToggleIcon } from "@/components/logo";
 import { Session } from "@/lib/types";
 
@@ -13,7 +13,6 @@ const NAV = [
   { href: "/requests", label: "Requests", icon: Inbox, badge: true },
   { href: "/shipments", label: "Shipments", icon: Package },
   { href: "/carriers", label: "Carriers", icon: Plane },
-  { href: "/workflow", label: "Workflow", icon: Workflow },
   { href: "/invoices", label: "Invoices", icon: Receipt },
 ];
 
