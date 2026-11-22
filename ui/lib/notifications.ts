@@ -27,7 +27,7 @@ function carrierSenders(): Set<string> {
   return carriers;
 }
 
-const TITLE = { delayed: "Flight delayed", offloaded: "Cargo left behind", cancelled: "Airline cancelled the booking" } as const;
+const TITLE = { damaged: "Cargo damaged or missing", delayed: "Flight delayed", offloaded: "Cargo left behind", cancelled: "Airline cancelled the booking" } as const;
 
 export function getNotifications(now = Date.now() / 1000): Notice[] {
   if (!getDb()) return [];

@@ -13,7 +13,7 @@ Never sends mail, never calls an API: every message is a draft row in `outbox`.
 import argparse, csv, json, os, re, sys, time
 from datetime import datetime, timedelta
 
-from . import invoice, match, messages, rules, state, tracking
+from . import disruptions, invoice, match, messages, rules, state, tracking
 
 TRACKING_DESK = "tracking@hackloop.mail"
 OUR_ADDRESS = "google@hackloop.mail"
@@ -231,6 +231,15 @@ def handle_carrier(con, m, who, now):
         ui = rules.classify(subject, body)
     else:
         typ, ui = rules.classify_carrier(subject, body)
+    problem = disruptions.detect(subject, body) if who["kind"] == "airline" else None
+    if problem:
+        if problem["type"] in ("damaged", "missing") and typ != "cancelled":
+            typ = problem["type"]                              # also inside a 'delivered' mail: no invoice on damaged cargo
+        elif typ in ("info", "confirmed", "booked") or (
+                typ == "cancelled" and not rules._BOOKING_CANCEL.search(text.lower()) and not rules._REFUSED.search(text.lower())):
+            typ = "delayed"                                    # 'storm, flight cancelled' is not a cancelled booking
+        if typ == "delayed":
+            ui = "delayed"
     tid, how = match.match(con, m, who["name"], who["kind"], typ)
     at = m.get("received_at") or now
     if not tid:
@@ -253,7 +262,9 @@ def handle_carrier(con, m, who, now):
     url = rules.tracking_url_in(text)
     reason = reason_in(body)
     summary = rules.key_sentence(body, rules.KEY.get(typ, r"."))
-    upd = {"reason": reason, "old_flight": old_f, "awb": awb}
+    if problem:                                                # our own words: a cut-out half sentence reads broken
+        reason = problem["de" if messages.lang_of(s) == "de" else "en"]
+    upd = {"reason": reason, "old_flight": old_f, "awb": awb, "cause": problem and problem["key"]}
     cols = {}
     new_eta, delay, flight = None, None, None
     if typ in ("delayed", "offloaded", "rebooked"):
@@ -292,9 +303,14 @@ def handle_carrier(con, m, who, now):
         cols["offer_flight"], cols["offer_date"] = of, od
         upd["offer_flight"], upd["offer_date"] = of, od
     summary = rules.key_sentence(body, rules.KEY.get(typ, r"."))
+    if problem and typ == problem["type"]:
+        summary = problem["sentence"]
+    new_cause = bool(problem) and not any(
+        (disruptions.detect("", r["raw"] or "") or {}).get("key") == problem["key"]
+        for r in state.rows(con, "SELECT raw FROM shipment_updates WHERE thread_id=? AND source='carrier'", (tid,)))
     repeat = False                       # the same news twice (e.g. a 'Nachtrag' with the same flight and ETA)
     if typ in ("delayed", "offloaded", "rebooked") and s["status"] in ("delayed", "offloaded", "rebooked"):
-        repeat = (not new_eta or new_eta == s["eta_current"]) and (not flight or flight == s.get("flight"))
+        repeat = (not new_eta or new_eta == s["eta_current"]) and (not flight or flight == s.get("flight")) and not new_cause
     st, ms = state.next_status(s["status"], s["milestone"], typ)
     was_rebook = s["status"] in ("cancelled_by_airline", "rebook_requested") and typ == "confirmed" and st == "confirmed"
     if new_eta and s["status"] not in state.FINAL:
@@ -327,6 +343,8 @@ def handle_carrier(con, m, who, now):
         drafts.append(_d(con, s2, "forwarder", "", messages.forwarder(s2, title, lines), title, key, now, uid))
 
     news_key = "%s:%s:%s" % (typ, new_eta or "", flight or "")
+    if problem and not new_eta and not flight:
+        news_key += ":" + problem["key"]
     if s["status"] in state.FINAL and typ not in ("price", "info"):
         pass                                                   # stored above; a final shipment is not re-opened by mail
     elif typ in ("delayed", "offloaded", "rebooked"):
@@ -348,6 +366,11 @@ def handle_carrier(con, m, who, now):
                                               "Offer: %s %s" % (upd.get("offer_flight") or "none", upd.get("offer_date") or ""),
                                               "A rebook offer is drafted for the customer. Their yes creates the rebook request."],
             "fwd:cancelled:%s:%s" % (tid, m["id"]))
+    elif typ in ("damaged", "missing"):
+        if new_cause:
+            cust(typ, "cust:%s:%s" % (tid, typ))
+            fwd("cargo %s" % typ, ["%s: %s" % (carrier, summary), "Customer update drafted. Open a claim with the airline."],
+                "fwd:%s:%s" % (typ, tid))
     elif typ == "cancel_confirmed":
         pass
     elif typ in ("departed", "arrived", "delivered", "picked_up", "handed_over"):

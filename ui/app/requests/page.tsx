@@ -176,7 +176,8 @@ function Rail({ sessions, activeId, onSelect, newCount, onClearNew }: { sessions
 
 // Who a mail is from, read off the runner's route. The customer is on the left, we are on the right,
 // everyone else (carriers, rate desk, booking and tracking notices) sits in between as a slim note.
-const WHO: Record<string, { label: string; side: "customer" | "other" }> = {
+const WHO: Record<string, { label: string; side: "customer" | "other" | "us" }> = {
+  own: { label: "Update to the client", side: "us" },
   rfq: { label: "Customer", side: "customer" }, follow_up: { label: "Customer", side: "customer" },
   carrier_bid: { label: "Carrier", side: "other" }, ratedesk: { label: "Rate desk", side: "other" },
   tariff: { label: "Tariff", side: "other" }, booking_confirmation: { label: "Booking", side: "other" },

@@ -148,20 +148,23 @@ def customer_update(s, typ, upd):
     reason = upd.get("reason")
     de = lang == "de"
     if typ == "delayed":
+        eta = fmt_date(upd.get("new_eta"), lang)                # never present the old date as the new arrival
         if de:
             lines = ["die Airline %s hat uns eine Verspätung Ihrer Sendung %s gemeldet." % (s.get("airline"), ref)]
             if reason:
                 lines.append("Grund laut Airline: %s." % reason)
             lines.append("Neue Ankunft in %s: %s%s." % (s.get("destination"), eta or "folgt",
                          (", mit Flug %s" % flight) if flight else ""))
-            lines.append("Sie müssen nichts tun. Wir verfolgen die Sendung weiter und melden uns bei jeder Änderung.")
+            lines.append("Falls der Zoll Unterlagen von Ihnen braucht, melden wir uns sofort." if upd.get("cause") == "customs" else
+                         "Sie müssen nichts tun. Wir verfolgen die Sendung weiter und melden uns bei jeder Änderung.")
         else:
             lines = ["%s has told us that your shipment %s is delayed." % (s.get("airline"), ref)]
             if reason:
                 lines.append("The airline's reason: %s." % reason)
             lines.append("New arrival in %s: %s%s." % (s.get("destination"), eta or "to follow",
                          (", on flight %s" % flight) if flight else ""))
-            lines.append("No action is needed from you. We keep watching the shipment and tell you about every change.")
+            lines.append("If customs needs any documents from you, we will ask right away." if upd.get("cause") == "customs" else
+                         "No action is needed from you. We keep watching the shipment and tell you about every change.")
     elif typ in ("offloaded", "rebooked"):
         if de:
             lines = ["Ihre Sendung %s fliegt mit einem anderen Flug: %s%s." % (
@@ -175,6 +178,17 @@ def customer_update(s, typ, upd):
                 (" (was %s)" % upd["old_flight"]) if upd.get("old_flight") else ""),
                 "New flight: %s. New arrival in %s: %s." % (flight or "to follow", s.get("destination"), eta or "to follow"),
                 "No action is needed from you."]
+    elif typ in ("damaged", "missing"):
+        if de:
+            lines = ["%s hat uns ein Problem mit Ihrer Sendung %s gemeldet: %s." % (
+                         s.get("airline"), ref, "die Ware ist beschädigt" if typ == "damaged" else "die Ware ist derzeit nicht auffindbar"),
+                     "Wir klären das mit der Airline und melden uns, sobald wir mehr wissen.",
+                     "Bitte bewahren Sie Handelsrechnung und Packliste für eine mögliche Reklamation auf."]
+        else:
+            lines = ["%s has reported a problem with your shipment %s: %s." % (
+                         s.get("airline"), ref, "the cargo is damaged" if typ == "damaged" else "the cargo cannot be located at the moment"),
+                     "We are following up with the airline and will write to you as soon as we know more.",
+                     "Please keep the commercial invoice and the packing list for a possible claim."]
     elif typ == "cancelled":
         offer = upd.get("offer_flight")
         odate = fmt_date(upd.get("offer_date"), lang)

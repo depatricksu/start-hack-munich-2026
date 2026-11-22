@@ -24,7 +24,7 @@ export const TYPE: Record<UpdateType, { label: string; tone: Tone }> = {
 // First hit wins, so the most serious news is checked first. EN + DE, lower-case text.
 export const RULES: [UpdateType, RegExp][] = [
   ["cancelled", /\bcancel|\bstorn|\brefus|unable to accept|cannot accept|can't accept|offload|abgelehnt|nicht annehmen/],
-  ["delayed", /\bdelay|verspät|verspaet|verzöger|verzoeger|postpone|new eta|revised eta|neue ankunft|reschedul|verschoben/],
+  ["delayed", /\bdelay|verspät|verspaet|verzöger|verzoeger|postpone|new eta|revised eta|neue ankunft|reschedul|verschoben|(?:weather|storm|snow|\bfog\b|strike|customs|airport|airspace|runway|technical|unwetter|streik|\bzoll\b)[^.]{0,80}\b(?:suspended|grounded|closed|halted|stuck|held|on hold|pushed back|affects)\b/],
   ["rebooked", /\brebook|re-book|new flight|umgebucht|umbuchung|anderen flug/],
   ["price", /surcharge|price change|rate increase|new price|rate update|tariff|preisänderung|preisaenderung|zuschlag/],
   ["delivered", /\bdelivered\b|proof of delivery|\bpod\b|zugestellt|ausgeliefert/],
