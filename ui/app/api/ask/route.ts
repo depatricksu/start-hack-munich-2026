@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ask, assistantKey, AssistantError, MODEL, Turn } from "@/lib/assistant";
+import { ask, assistantKey, assistantModel, provider, AssistantError, Turn } from "@/lib/assistant";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -7,7 +7,7 @@ export const maxDuration = 120;
 
 // Is the assistant set up? The page asks this once to decide what to show.
 export function GET() {
-  return NextResponse.json({ ready: !!assistantKey(), model: MODEL });
+  return NextResponse.json({ ready: !!assistantKey(), model: assistantModel(), provider: provider() });
 }
 
 // POST {turns:[{role,text}]} -> a stream of JSON lines: {step} while it looks things up, then {answer} or {error}.
@@ -22,7 +22,7 @@ export async function POST(req: Request) {
   if (!turns.length || turns[turns.length - 1].role !== "user")
     return NextResponse.json({ error: "bad_request", message: "Send a question." }, { status: 400 });
   if (!assistantKey())
-    return NextResponse.json({ error: "no_key", message: "The assistant has no key yet." }, { status: 503 });
+    return NextResponse.json({ error: "no_key", message: "The assistant has no key yet. Add OPENAI_API_KEY to ui/.env.local and restart the UI." }, { status: 503 });
 
   const enc = new TextEncoder();
   const stream = new ReadableStream({
