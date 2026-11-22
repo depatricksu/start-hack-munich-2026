@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Relay — 5U pitch</title>
+<style>
+  :root{
+    --bg:#060708; --fg:#f4f4f6; --muted:#9a9aa2; --dim:#6c6c74;
+    --line:rgba(255,255,255,0.10);
+    --glass:rgba(255,255,255,0.05);
+    --glass2:rgba(255,255,255,0.08);
+    --red:#ff4d4d;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html{-webkit-print-color-adjust:exact; print-color-adjust:exact;}
+  @page{ size:13.333in 7.5in; margin:0; }
+  body{ font-family:"Helvetica Neue",Helvetica,Arial,sans-serif; color:var(--fg); background:var(--bg); }
+  .num{font-variant-numeric:tabular-nums; font-feature-settings:"tnum";}
+
+  .slide{
+    position:relative; width:13.333in; height:7.5in; overflow:hidden;
+    padding:0.62in 0.8in; display:flex; flex-direction:column;
+    background:
+      radial-gradient(60% 55% at 85% -8%, rgba(74,86,116,0.26), transparent 62%),
+      radial-gradient(50% 50% at -6% 110%, rgba(48,56,78,0.20), transparent 60%),
+      var(--bg);
+    page-break-after:always;
+  }
+  .slide:last-child{page-break-after:auto;}
+
+  .head{display:flex; align-items:center; justify-content:space-between; margin-bottom:auto;}
+  .brand{display:flex; align-items:center; gap:10px;}
+  .mark{width:30px; height:30px; border-radius:9px; background:var(--glass2);
+        border:1px solid var(--line); display:flex; align-items:center; justify-content:center;}
+  .mark svg{width:17px; height:17px;}
+  .brand .name{font-size:17px; font-weight:700; letter-spacing:-.3px;}
+  .slabel{color:var(--dim); font-size:10px; letter-spacing:1.6px; text-transform:uppercase; font-weight:700;}
+
+  .body{margin:auto 0;}
+  .eyebrow{color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:2px; font-weight:700; margin-bottom:14px;}
+  .glass{background:var(--glass); border:1px solid var(--line); border-radius:16px;}
+  .glass2{background:var(--glass2); border:1px solid var(--line); border-radius:13px;}
+
+  .foot{margin-top:auto; display:flex; justify-content:space-between; align-items:flex-end;
+        color:var(--dim); font-size:10px; letter-spacing:.3px; padding-top:14px;}
+  .pg{color:var(--dim); font-size:10px;}
+
+  /* ---- slide 1 ---- */
+  .hero{display:flex; flex-direction:column; justify-content:center; height:100%;}
+  .hero .mark-lg{width:54px; height:54px; border-radius:15px; background:var(--glass2); border:1px solid var(--line);
+        display:flex; align-items:center; justify-content:center; margin-bottom:26px;}
+  .hero .mark-lg svg{width:30px; height:30px;}
+  h1{font-size:68px; line-height:0.98; letter-spacing:-2px; font-weight:700;}
+  h1 .thin{color:var(--muted); font-weight:600;}
+  .hero .sub{color:var(--muted); font-size:19px; margin-top:18px; max-width:8.6in;}
+  .hero .meta{margin-top:30px; display:flex; gap:10px;}
+  .pill{background:var(--glass2); border:1px solid var(--line); border-radius:999px; padding:7px 15px; font-size:12.5px; color:var(--muted);}
+  .pill b{color:var(--fg);}
+
+  /* ---- generic big statement ---- */
+  h2{font-size:40px; line-height:1.06; letter-spacing:-1px; font-weight:700; margin-bottom:8px;}
+  h2 .thin{color:var(--muted); font-weight:600;}
+  .say{color:var(--muted); font-size:17px; max-width:9.4in; line-height:1.5;}
+  .say b{color:var(--fg); font-weight:600;}
+
+  /* problem / answer duo */
+  .duo{display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:26px;}
+  .duo .card{padding:24px 26px;}
+  .duo .lab{color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:1.4px; font-weight:700; margin-bottom:10px;}
+  .duo .card p{color:var(--muted); font-size:15.5px; line-height:1.5;}
+  .duo .answer .big{font-size:52px; font-weight:700; letter-spacing:-1.5px; margin-bottom:6px;}
+  .duo .answer .big small{font-size:19px; color:var(--muted); font-weight:600; letter-spacing:0;}
+
+  /* flow */
+  .steps{display:flex; align-items:stretch; gap:9px; margin-top:28px;}
+  .step{flex:1; padding:16px 14px;}
+  .step .k{font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:1px; font-weight:700;}
+  .step .v{font-size:14px; color:var(--fg); margin-top:5px; font-weight:600;}
+  .step .v span{color:var(--muted); font-weight:400;}
+  .arrow{align-self:center; color:var(--dim); font-size:17px;}
+  .principle{display:flex; gap:12px; margin-top:16px;}
+  .principle .p{flex:1; padding:16px 18px;}
+  .principle .p .k{font-weight:700; font-size:15px; margin-bottom:4px;}
+  .principle .p .k .dot{display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:8px; vertical-align:middle;}
+  .principle .p .d{color:var(--muted); font-size:13px; line-height:1.45;}
+
+  /* formats + control room */
+  .cols{display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:26px;}
+  .feat{padding:22px 24px;}
+  .feat h3{font-size:19px; font-weight:700; margin-bottom:12px;}
+  .feat ul{list-style:none;}
+  .feat li{color:var(--muted); font-size:14.5px; line-height:1.45; padding-left:20px; position:relative; margin-bottom:9px;}
+  .feat li:before{content:""; position:absolute; left:0; top:7px; width:8px; height:8px; border-radius:3px; background:var(--glass2); border:1px solid var(--line);}
+  .feat li b{color:var(--fg); font-weight:600;}
+  .chips{display:flex; flex-wrap:wrap; gap:8px; margin-top:14px;}
+  .chip{background:var(--glass2); border:1px solid var(--line); border-radius:9px; padding:6px 12px; font-size:12.5px; color:var(--muted);}
+  .chip b{color:var(--fg);}
+
+  /* chaos */
+  .chaos{display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; margin-top:26px;}
+  .chaos .c{padding:22px 22px;}
+  .chaos .c .t{font-weight:700; font-size:16px; margin-bottom:8px;}
+  .chaos .c .t .mins{color:var(--red); font-weight:700; font-size:13px;}
+  .chaos .c .d{color:var(--muted); font-size:13.5px; line-height:1.5;}
+
+  /* build stats */
+  .build{display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-top:28px;}
+  .build .b{padding:22px 24px;}
+  .build .n{font-size:40px; font-weight:700; letter-spacing:-1px;}
+  .build .l{color:var(--dim); font-size:12px; text-transform:uppercase; letter-spacing:.8px; font-weight:700; margin-top:4px;}
+
+  /* numbers slide */
+  .bignums{display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-top:12px;}
+  .bignums .b{padding:26px 24px;}
+  .bignums .n{font-size:46px; font-weight:700; letter-spacing:-1.5px;}
+  .bignums .n .u{font-size:22px; color:var(--muted); font-weight:600;}
+  .bignums .l{color:var(--dim); font-size:12px; text-transform:uppercase; letter-spacing:.8px; font-weight:700; margin-top:4px;}
+  .bignums.row2{margin-top:16px;}
+  .liveband{display:inline-flex; align-items:center; gap:8px; background:var(--glass2); border:1px solid var(--line);
+        border-radius:999px; padding:6px 14px; font-size:12px; color:var(--fg); letter-spacing:.4px;}
+  .liveband .d{color:var(--red); font-size:15px; line-height:1;}
+
+  .close h2{font-size:44px;}
+</style>
+</head>
+<body>
+
+<!-- ===== SLIDE 1 — TITLE ===== -->
+<section class="slide">
+  <div class="head">
+    <div class="brand"><div class="mark"><svg viewBox="0 0 24 24"><path d="M4 5 L13 5 L9 12 L18 12 L7 20 L11 13 L4 13 Z" fill="#fff"/></svg></div><div class="name">Relay</div></div>
+    <div class="slabel">01 / 07</div>
+  </div>
+  <div class="hero">
+    <div class="mark-lg"><svg viewBox="0 0 24 24"><path d="M4 5 L13 5 L9 12 L18 12 L7 20 L11 13 L4 13 Z" fill="#fff"/></svg></div>
+    <h1>Who answers<br><span class="thin">at 2&nbsp;a.m.?</span></h1>
+    <div class="sub">An autonomous air freight forwarder that quotes, books and tracks shipments on its own — all night.</div>
+    <div class="meta">
+      <span class="pill">Team <b>Google</b></span>
+      <span class="pill"><b>START&nbsp;Hack</b> Munich 2026</span>
+      <span class="pill"><b>5U&nbsp;AI</b> challenge</span>
+    </div>
+  </div>
+  <div class="foot"><span>Relay · autonomous air freight forwarder</span><span>22 Nov 2026</span></div>
+</section>
+
+<!-- ===== SLIDE 2 — PROBLEM / ANSWER ===== -->
+<section class="slide">
+  <div class="head">
+    <div class="brand"><div class="mark"><svg viewBox="0 0 24 24"><path d="M4 5 L13 5 L9 12 L18 12 L7 20 L11 13 L4 13 Z" fill="#fff"/></svg></div><div class="name">Relay</div></div>
+    <div class="slabel">The problem · 02 / 07</div>
+  </div>
+  <div class="body">
+    <h2>Freight quoting <span class="thin">stops overnight.</span></h2>
+    <div class="say">A forwarder buys air transport for a customer: read the request, find the best price from airlines and
+      truckers, quote, book, track. After hours the mail just waits — and by morning the customer has asked three others.</div>
+    <div class="duo">
+      <div class="card glass">
+        <div class="lab">02:00 — the request</div>
+        <p>A textile company in Hamburg needs a price to Delhi, with a truck from their own site. Cheapest option, please.</p>
+      </div>
+      <div class="card glass answer">
+        <div class="lab">Relay's reply</div>
+        <div class="big num">62<small> seconds later</small></div>
+        <p>One all-in price, in the customer's language, in their own thread. Says yes → booked. Asks where it is → answered.</p>
+      </div>
+    </div>
+  </div>
+  <div class="foot"><span>Relay · Team Google</span><span class="pg">02 / 07</span></div>
+</section>
+
+<!-- ===== SLIDE 3 — HOW IT WORKS ===== -->
+<section class="slide">
+  <div class="head">
+    <div class="brand"><div class="mark"><svg viewBox="0 0 24 24"><path d="M4 5 L13 5 L9 12 L18 12 L7 20 L11 13 L4 13 Z" fill="#fff"/></svg></div><div class="name">Relay</div></div>
+    <div class="slabel">How it works · 03 / 07</div>
+  </div>
+  <div class="body">
+    <h2>Code does the math. <span class="thin">AI reads the mail. People make the calls.</span></h2>
+    <div class="steps">
+      <div class="step glass"><div class="k">In</div><div class="v">Mail <span>routed</span></div></div>
+      <div class="arrow">→</div>
+      <div class="step glass"><div class="k">Read</div><div class="v">One AI call <span>→ fields</span></div></div>
+      <div class="arrow">→</div>
+      <div class="step glass"><div class="k">Gate</div><div class="v">Rules <span>check it</span></div></div>
+      <div class="arrow">→</div>
+      <div class="step glass"><div class="k">Price</div><div class="v">Sheets · portal · bids</div></div>
+      <div class="arrow">→</div>
+      <div class="step glass"><div class="k">Quote</div><div class="v">One price <span>sent</span></div></div>
+      <div class="arrow">→</div>
+      <div class="step glass"><div class="k">Then</div><div class="v">Book & track</div></div>
+    </div>
+    <div class="principle">
+      <div class="p glass2"><div class="k"><span class="dot" style="background:#fff"></span>Every number is tested</div>
+        <div class="d">Prices come from code we can test — the AI never invents one. One small gateway call per quote, ~$0.0009.</div></div>
+      <div class="p glass2"><div class="k"><span class="dot" style="background:var(--muted)"></span>No guessing</div>
+        <div class="d">If a rule check fails, the request is handed to a person — because only the first answer in a thread counts.</div></div>
+      <div class="p glass2"><div class="k"><span class="dot" style="background:var(--red)"></span>People stay in charge</div>
+        <div class="d">The hard cases land in the control room with full history and a "send as human" button.</div></div>
+    </div>
+  </div>
+  <div class="foot"><span>Relay · Team Google</span><span class="pg">03 / 07</span></div>
+</section>
+
+<!-- ===== SLIDE 4 — READS EVERYTHING ===== -->
+<section class="slide">
+  <div class="head">
+    <div class="brand"><div class="mark"><svg viewBox="0 0 24 24"><path d="M4 5 L13 5 L9 12 L18 12 L7 20 L11 13 L4 13 Z" fill="#fff"/></svg></div><div class="name">Relay</div></div>
+    <div class="slabel">Reads anything · 04 / 07</div>
+  </div>
+  <div class="body">
+    <h2>The request can arrive <span class="thin">as anything.</span></h2>
+    <div class="cols">
+      <div class="feat glass">
+        <h3>Every format, one pipeline</h3>
+        <ul>
+          <li><b>PDF & Word</b> requests and packing lists, parsed into the same fields as a plain mail.</li>
+          <li><b>Voice messages</b> transcribed on-device, then quoted like any other request.</li>
+          <li><b>Photos</b> read with on-device text recognition — UN numbers, classes, lithium & aerosols — even when the mail says "non-dangerous".</li>
+        </ul>
+        <div class="chips">
+          <span class="chip"><b>PDF</b></span><span class="chip"><b>Word</b></span><span class="chip"><b>Excel</b></span>
+          <span class="chip"><b>Voice .mp3</b></span><span class="chip"><b>Photo OCR</b></span>
+        </div>
+      </div>
+      <div class="feat glass">
+        <h3>The control room</h3>
+        <ul>
+          <li>Every conversation, live: route, facts, price options, the full thread with its attachments.</li>
+          <li>Unclear or unusual cargo surfaces as <b>"Needs you"</b>, with the whole history in one place.</li>
+          <li>Prompt-injection safe: prices, links and payment details are always replaced by our own template — <b>the price stays ours</b>.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <div class="foot"><span>Relay · Team Google</span><span class="pg">04 / 07</span></div>
+</section>
+
+<!-- ===== SLIDE 5 — CHAOS ===== -->
+<section class="slide">
+  <div class="head">
+    <div class="brand"><div class="mark"><svg viewBox="0 0 24 24"><path d="M4 5 L13 5 L9 12 L18 12 L7 20 L11 13 L4 13 Z" fill="#fff"/></svg></div><div class="name">Relay</div></div>
+    <div class="slabel">Hardened live · 05 / 07</div>
+  </div>
+  <div class="body">
+    <h2>5U changed the rules every hour. <span class="thin">We treated every lost round as data.</span></h2>
+    <div class="chaos">
+      <div class="c glass">
+        <div class="t">Dangerous goods, hidden <span class="mins">· fixed fast</span></div>
+        <div class="d">17:00 — cargo was dangerous in the attachment while the mail said "non-dangerous". Relay now reads every attachment and asks for the safety papers.</div>
+      </div>
+      <div class="c glass">
+        <div class="t">Rate portal went down <span class="mins">· minutes</span></div>
+        <div class="d">18:40 — the portal returned 503. Relay fell back to live carrier bids by email within minutes and kept quoting.</div>
+      </div>
+      <div class="c glass">
+        <div class="t">"Do not offer this airline" <span class="mins">· round won</span></div>
+        <div class="d">A customer excluded an airline mid-thread. No team passed that round. Relay now never even asks the excluded carrier.</div>
+      </div>
+    </div>
+  </div>
+  <div class="foot"><span>Relay · Team Google</span><span class="pg">05 / 07</span></div>
+</section>
+
+<!-- ===== SLIDE 6 — HOW WE BUILT IT ===== -->
+<section class="slide">
+  <div class="head">
+    <div class="brand"><div class="mark"><svg viewBox="0 0 24 24"><path d="M4 5 L13 5 L9 12 L18 12 L7 20 L11 13 L4 13 Z" fill="#fff"/></svg></div><div class="name">Relay</div></div>
+    <div class="slabel">How we built it · 06 / 07</div>
+  </div>
+  <div class="body">
+    <h2>Four people, four AI agents, <span class="thin">one repo, one night.</span></h2>
+    <div class="say">One folder per owner, agents coordinating in a shared issue with CLAIM / DONE / NEED. Only one machine may
+      send mail; every other runs dry. A fix goes live only after all tests and a fake quote pass — so a bad change can't take the desk down.</div>
+    <div class="build">
+      <div class="b glass"><div class="n num">4 + 4</div><div class="l">People + AI agents</div></div>
+      <div class="b glass"><div class="n num">168</div><div class="l">Commits, one repo</div></div>
+      <div class="b glass"><div class="n num">62</div><div class="l">Pull requests merged</div></div>
+      <div class="b glass"><div class="n num">510</div><div class="l">Tests — green to ship</div></div>
+    </div>
+  </div>
+  <div class="foot"><span>Relay · Team Google</span><span class="pg">06 / 07</span></div>
+</section>
+
+<!-- ===== SLIDE 7 — NUMBERS + CLOSE ===== -->
+<section class="slide">
+  <div class="head">
+    <div class="brand"><div class="mark"><svg viewBox="0 0 24 24"><path d="M4 5 L13 5 L9 12 L18 12 L7 20 L11 13 L4 13 Z" fill="#fff"/></svg></div><div class="name">Relay</div></div>
+    <div class="slabel">Tonight in numbers · 07 / 07</div>
+  </div>
+  <div class="body">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:18px;">
+      <h2 style="margin:0;">So who answers <span class="thin">at two in the morning?</span></h2>
+      <span class="liveband"><span class="d">●</span> LIVE · rank 4 of 15</span>
+    </div>
+    <div class="bignums">
+      <div class="b glass"><div class="n num">8,663</div><div class="l">Points scored</div></div>
+      <div class="b glass"><div class="n num">80</div><div class="l">Quotes accepted</div></div>
+      <div class="b glass"><div class="n num">80</div><div class="l">Shipments booked</div></div>
+      <div class="b glass"><div class="n num">16</div><div class="l">"Most human" bonuses</div></div>
+    </div>
+    <div class="bignums row2">
+      <div class="b glass2"><div class="n num">105</div><div class="l">Requests handled</div></div>
+      <div class="b glass2"><div class="n num">78<span class="u">%</span></div><div class="l">Accept rate</div></div>
+      <div class="b glass2"><div class="n num">62<span class="u">s</span></div><div class="l">Median to quote</div></div>
+      <div class="b glass2"><div class="n num">$0.0009</div><div class="l">AI cost / quote</div></div>
+    </div>
+    <div class="say" style="margin-top:22px; font-size:18px;"><b>Relay does.</b> And at eight, the team only sees the cases that really need them.</div>
+  </div>
+  <div class="foot"><span>Relay · Team Google · 5U AI · START Hack Munich 2026</span><span class="pg">Live 5U board · 22 Nov 2026</span></div>
+</section>
+
+</body>
+</html>
