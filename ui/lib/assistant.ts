@@ -1,15 +1,17 @@
 // "Ask Relay" assistant: an LLM that answers the forwarder's questions from the runner's data.
 // It can only READ (three tools over the read-only SQLite connection). It never sends mail, never books,
-// and never calls the 5U gateway: it talks to api.anthropic.com with its own key (RELAY_ASSISTANT_KEY).
+// and never calls the 5U gateway. It talks to api.openai.com with OPENAI_API_KEY, or, when only RELAY_ASSISTANT_KEY
+// is set, to api.anthropic.com. OpenAI wins when both are set.
 import Anthropic from "@anthropic-ai/sdk";
 import { getDb } from "./db";
 import { getDetail } from "./data";
 import { search } from "./search";
+import { ChatError, OPENAI_DEFAULT_MODEL, runOpenAI } from "./openai-chat";
 
 // Fixed on purpose. The shell may carry ANTHROPIC_BASE_URL / ANTHROPIC_API_KEY for other things (a proxy,
 // the game's gateway); the assistant must not pick those up, so both are passed explicitly.
 const API_URL = "https://api.anthropic.com";
-export const MODEL = process.env.RELAY_ASSISTANT_MODEL || "claude-opus-5-5";
+const ANTHROPIC_MODEL = "claude-opus-5-5";
 const EFFORT = (process.env.RELAY_ASSISTANT_EFFORT || "low") as "low" | "medium" | "high";
 const MAX_STEPS = 8;
 const CELL = 400;        // longest text cell a SQL result may return
@@ -18,9 +20,25 @@ const MAIL = 2500;       // longest mail body get_case returns (the rest is mark
 export type Turn = { role: "user" | "assistant"; text: string };
 export type Step = { tool: string; label: string };
 
+export type Provider = "openai" | "anthropic";
+
+// OPENAI_API_KEY first; RELAY_ASSISTANT_KEY (Anthropic) only when there is no OpenAI key.
+export function provider(): Provider | null {
+  if ((process.env.OPENAI_API_KEY || "").trim()) return "openai";
+  if ((process.env.RELAY_ASSISTANT_KEY || "").trim()) return "anthropic";
+  return null;
+}
+
 export function assistantKey(): string | null {
-  const k = (process.env.RELAY_ASSISTANT_KEY || "").trim();
-  return k || null;
+  const p = provider();
+  if (p === "openai") return (process.env.OPENAI_API_KEY || "").trim();
+  if (p === "anthropic") return (process.env.RELAY_ASSISTANT_KEY || "").trim();
+  return null;
+}
+
+export function assistantModel(): string {
+  const set = (process.env.RELAY_ASSISTANT_MODEL || "").trim();
+  return set || (provider() === "anthropic" ? ANTHROPIC_MODEL : OPENAI_DEFAULT_MODEL);
 }
 
 const SYSTEM = `You are Relay, the assistant inside a freight forwarder's back office. The forwarder (the user) quotes and books air freight for customers. An automatic clerk handles each request: it reads the customer's mail, asks truckers, airlines and a rate desk for prices, sends a quote, books when the customer says yes, and issues an invoice. You answer the forwarder's questions about that work from the data, using your tools.
@@ -148,19 +166,38 @@ export class AssistantError extends Error {
 // One question -> one answer. Calls the model, runs the read-only tools it asks for, repeats until it answers.
 export async function ask(history: Turn[], onStep: (s: Step) => void): Promise<string> {
   const key = assistantKey();
-  if (!key) throw new AssistantError("no_key", "RELAY_ASSISTANT_KEY is not set.");
-  const client = new Anthropic({ apiKey: key, baseURL: API_URL, authToken: null });
+  const which = provider();
+  if (!key || !which) throw new AssistantError("no_key", "OPENAI_API_KEY is not set.");
 
   // The data can be a snapshot, so "today" means the day of the newest request, not the wall clock.
   const newest = (getDb()?.prepare("SELECT MAX(received_at) AS t FROM sessions").get() as { t: number | null } | undefined)?.t ?? null;
-  const messages: Anthropic.Beta.Messages.BetaMessageParam[] = history.slice(-12)
-    .map((t) => ({ role: t.role, content: t.text.slice(0, 4000) }));
-  if (newest) messages[messages.length - 1] = { role: "user", content: `${history[history.length - 1].text.slice(0, 4000)}\n\n(The newest request in the data arrived ${iso(newest)}. Treat that as "now".)` };
+  const turns = history.slice(-12).map((t) => ({ role: t.role, content: t.text.slice(0, 4000) }));
+  if (newest) turns[turns.length - 1] = { role: "user", content: `${history[history.length - 1].text.slice(0, 4000)}\n\n(The newest request in the data arrived ${iso(newest)}. Treat that as "now".)` };
+
+  if (which === "openai") {
+    try {
+      return await runOpenAI({
+        key, model: assistantModel(), system: SYSTEM, history: turns,
+        tools: TOOLS.map((t) => ({ name: t.name, description: t.description ?? "", input_schema: t.input_schema as Record<string, unknown> })),
+        runTool: (name, input) => runTool(name, input),
+        onStep: (s) => onStep(s), maxSteps: MAX_STEPS, maxTokens: 2000,
+      });
+    } catch (e) {
+      if (e instanceof ChatError) throw new AssistantError(e.code, e.message);
+      throw e;
+    }
+  }
+  return askAnthropic(key, turns, onStep);
+}
+
+async function askAnthropic(key: string, turns: { role: "user" | "assistant"; content: string }[], onStep: (s: Step) => void): Promise<string> {
+  const client = new Anthropic({ apiKey: key, baseURL: API_URL, authToken: null });
+  const messages: Anthropic.Beta.Messages.BetaMessageParam[] = turns;
 
   try {
     for (let i = 0; i < MAX_STEPS; i += 1) {
       const res = await client.beta.messages.create({
-        model: MODEL, max_tokens: 16000,
+        model: assistantModel(), max_tokens: 16000,
         betas: ["server-side-fallback-2026-07-01"], fallbacks: "default",
         output_config: { effort: EFFORT },
         system: [{ type: "text", text: SYSTEM, cache_control: { type: "ephemeral" } }],

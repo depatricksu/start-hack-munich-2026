@@ -202,7 +202,7 @@ export function Ask({ stats, latest }: { stats: Stats; latest: LatestRow[] }) {
   const notice = ready === false && (
     <p className="mt-3 text-center text-[13px] leading-relaxed text-[var(--warn)]">
       The assistant has no key yet, so questions cannot be answered. Finding cases by words still works.
-      Add <span className="tnum text-[12px]">RELAY_ASSISTANT_KEY</span> to <span className="tnum text-[12px]">ui/.env.local</span> and restart the UI.
+      Add <span className="tnum text-[12px]">OPENAI_API_KEY</span> to <span className="tnum text-[12px]">ui/.env.local</span> and restart the UI.
     </p>
   );
 
