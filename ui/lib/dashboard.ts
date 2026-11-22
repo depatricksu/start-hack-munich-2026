@@ -214,9 +214,13 @@ function feedFrom(events: (EventRow & { thread_id: number | null })[], byId: Map
 // ---------- shipments (SIMULATED step + ETA) ----------
 
 const STEPS: ShipStep[] = ["Booked", "Picked up", "Departed", "Arrived", "Delivered"];
-function simulate(bookedAt: number, transitDays: number | null, now: number) {
+// The one simulated timeline (the game has no flight-status feed). /shipments uses the same marks.
+export function simMarks(bookedAt: number, transitDays: number | null): number[] {
   const t = Math.max(1, transitDays ?? 3) * DAY;
-  const marks = [bookedAt, bookedAt + 4 * H, bookedAt + 12 * H, bookedAt + 12 * H + t, bookedAt + 24 * H + t];
+  return [bookedAt, bookedAt + 4 * H, bookedAt + 12 * H, bookedAt + 12 * H + t, bookedAt + 24 * H + t];
+}
+function simulate(bookedAt: number, transitDays: number | null, now: number) {
+  const marks = simMarks(bookedAt, transitDays);
   let i = 0;
   for (let k = 0; k < marks.length; k++) if (now >= marks[k]) i = k;
   return { step: STEPS[i], stepIndex: i, eta: marks[4] };

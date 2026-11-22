@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { Check, ChevronDown, FileSpreadsheet, FileText, Mic, Paperclip } from "lucide-react";
 import { BigClock, Countdown, LANG_FLAG, StatusChip, bestOption, money, sameOption } from "@/components/bits";
 import { FileRef, Option, Session, SessionDetail, Status } from "@/lib/types";
+import type { ShipmentDetail } from "@/lib/shipments";
 
 type Source = "live" | "demo";
 
@@ -384,6 +385,8 @@ function Facts({ d }: { d: SessionDetail }) {
         </div>
       )}
 
+      {d.status === "confirmed" && <AfterYes id={d.thread_id} />}
+
       <section className="rounded-2xl glass-2 p-5">
         <h3 className="mb-2 text-sm font-semibold text-white">Price options <span className="num font-normal text-zinc-500">{d.options.length}</span></h3>
         <OptionsTable options={d.options} chosen={d.chosen} />
@@ -391,6 +394,38 @@ function Facts({ d }: { d: SessionDetail }) {
 
       <Thread d={d} />
     </div>
+  );
+}
+
+// Confirmed bookings: one line per party with what went out and what is still a draft (details on /shipments).
+function AfterYes({ id }: { id: number }) {
+  const data = useJson<{ shipment: ShipmentDetail | null }>(`/api/shipments/${id}`, 10000);
+  const msgs = data?.shipment?.messages ?? [];
+  if (!msgs.length) return null;
+  const parties = new Map<string, { sent: number; draft: number }>();
+  for (const m of msgs) {
+    const p = parties.get(m.role) ?? { sent: 0, draft: 0 };
+    p[m.state === "sent" ? "sent" : "draft"]++;
+    parties.set(m.role, p);
+  }
+  return (
+    <section className="rounded-2xl glass-2 p-5">
+      <div className="mb-2 flex items-baseline">
+        <h3 className="text-sm font-semibold text-white">After the yes</h3>
+        <a href={`/shipments?id=${id}`} className="ml-auto text-xs text-zinc-400 hover:text-white">See all messages</a>
+      </div>
+      <ul className="space-y-1 text-[13px]">
+        {[...parties.entries()].map(([role, p]) => (
+          <li key={role} className="flex items-center gap-2">
+            <span className="text-zinc-300">{role}</span>
+            <span className="ml-auto flex gap-1.5">
+              {p.sent > 0 && <span className="rounded-full bg-emerald-400/12 px-2 py-0.5 text-[11px] text-emerald-300 ring-1 ring-inset ring-emerald-400/25">{p.sent} sent</span>}
+              {p.draft > 0 && <span className="rounded-full bg-white/6 px-2 py-0.5 text-[11px] text-zinc-300 ring-1 ring-inset ring-white/12">{p.draft} draft{p.draft === 1 ? "" : "s"}</span>}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
