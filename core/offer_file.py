@@ -102,6 +102,38 @@ def lines(tid, session, best, fields, body, today=None):
     return out
 
 
+def multi_lines(tid, session, parts, body, postcode="", today=None):
+    """The offer sheet for a request with several shipments: one block and one all-in price per shipment, no sum.
+    parts: the chosen option of each shipment (origin, destination, airline, transit_days, total_eur, optional
+    kg / cbm / trucker / insurance)."""
+    day = (today or datetime.date.today()).strftime("%d %b %Y")
+    out = ["OFFER GOOGLE-%s" % tid, "Date: %s" % day, "From: Lena Hofmann, Air Export, google@hackloop.mail",
+           "To: %s" % (session.get("customer") or ""), "Your request: %s" % _latin(session.get("subject") or ""), ""]
+    for n, p in enumerate(parts, 1):
+        out.append("SHIPMENT %d: %s - %s" % (p.get("n") or n, p.get("origin"), p.get("destination")))
+        if p.get("kg"):
+            out.append("Shipment: %g kg gross%s" % (p["kg"], (", %g cbm" % p["cbm"]) if p.get("cbm") else ""))
+        if postcode and p.get("trucker"):
+            out.append("Pickup: by truck from postcode %s to %s airport, included" % (postcode, p.get("origin")))
+        out.append("Airline: %s, transit about %s day%s" % (p.get("airline"), p.get("transit_days"), "" if str(p.get("transit_days")) == "1" else "s"))
+        if p.get("insurance"):
+            i = p["insurance"]
+            out.append("Cargo insurance: %s EUR, included (%s%% of %s EUR goods value at %s%%)" % (i["premium"], i["pct"], i["value"], i["rate"]))
+        out += ["ALL-IN PRICE SHIPMENT %d: %s EUR" % (p.get("n") or n, p.get("total_eur") or p.get("total")), ""]
+    out += ["-" * 60, ""]
+    for para in _latin(body if showable(body) else "").split("\n"):
+        out += textwrap.wrap(para, 92) or [""]
+    return out
+
+
+def multi_file(tid, session, parts, body, request_text, postcode=""):
+    """-> attachments for mailbox.send ([] when the customer wants no files)."""
+    if refused(request_text):
+        return []
+    data = pdf(multi_lines(tid, session, parts, body, postcode))
+    return [{"filename": "offer-GOOGLE-%s.pdf" % tid, "content_type": MIME["pdf"], "content_base64": base64.b64encode(data).decode()}]
+
+
 def pdf(text_lines):
     """A plain A4 PDF, Helvetica, uncompressed (any reader and any text extractor finds the price)."""
     def esc(s):
