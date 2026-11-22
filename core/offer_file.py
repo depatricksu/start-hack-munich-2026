@@ -90,6 +90,8 @@ def lines(tid, session, best, fields, body, today=None):
     if best.get("insurance"):
         i = best["insurance"]
         out.append("Cargo insurance: %s EUR, included (%s%% of %s EUR goods value at %s%%)" % (i["premium"], i["pct"], i["value"], i["rate"]))
+    if best.get("customs"):
+        out.append("Customs clearance: %s EUR, included" % best["customs"]["fee"])
     out += ["", "ALL-IN PRICE: %s %s" % (best.get("total"), best.get("currency") or "EUR"), ""]
     if fields.get("dg"):
         out += ["Dangerous goods: yes, documents required before booking", ""]

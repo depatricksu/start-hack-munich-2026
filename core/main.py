@@ -12,7 +12,7 @@ from decimal import Decimal
 from . import attachments, config, db, mailbox, safety, offer_file
 from router.route import route
 from llm import extract as llm
-from pricing import price as sheets, insurance
+from pricing import price as sheets, insurance, customs
 from sourcing import portal
 from actions import queue as actions            # take-over queue: sends human replies typed in the UI
 from shared.rfq import gate as rfq_gate
@@ -405,6 +405,12 @@ def finalize(tid):
     if ins:
         best = insurance.add(best, ins)
         db.event("insurance", tid, **ins)
+    cus = customs.wanted(asked_mail[0] if asked_mail else "")     # "include customs clearance in the all-in price: 45 EUR"
+    if cus and customs.add(best, cus) is not best:
+        best = customs.add(best, cus)
+        db.event("customs", tid, **cus)
+    else:
+        cus = None
     if fields.get("dg") and dg.mode() == "human":
         return needs_human(tid, None, "dangerous goods: " + dg.describe(fields["dg"]))
     if not db.claim_for_sending(tid):                        # someone already quoted this thread
@@ -415,6 +421,8 @@ def finalize(tid):
     body = dg.note(fields, body)                             # "priced on your packing list: 1729 kg, not 1210 kg"
     if ins:                                                  # say what is in the price, before polish adds "not included"
         body = llm._add_expert_note(body, insurance.sentence(ins, llm.reply_lang(fields)), str(best["total"]))
+    if cus:
+        body = llm._add_expert_note(body, customs.sentence(cus, llm.reply_lang(fields)), str(best["total"]))
     try:                                                     # last human touch (Riky): signed name, answer their asks
         first = db.con().execute("SELECT body FROM mails WHERE id=?", (tid,)).fetchone()
         body, touched = humanize.polish(body, fields, best, first[0] if first else "")
