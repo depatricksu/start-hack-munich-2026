@@ -146,6 +146,44 @@ class TestOutcomes(unittest.TestCase):
         self.assertIsNotNone(crm.get(tid))                    # booked at the quoted price, no call needed
         self.assertNotEqual(db.session(tid)["status"], "needs_human")
 
+    def test_price_stays_question_after_the_call_offer_is_answered_by_mail(self):
+        """5U, 22 Nov 05:18 (request 39215): '9 percent less, can you match?' -> call offered -> 'Could you confirm by email
+        whether your price stays as offered? If it's changed, please send the new all-in total.' was parked."""
+        tid = 4270
+        quote(tid)
+        with mock.patch.object(handlers, "MEETING_MIN_EUR", handlers.Decimal("100")):
+            answer(tid, 1, "Thanks for the offer. It works for us, and we\u2019d like to place the shipment with you.\n\nAnother forwarder "
+                           "has quoted 9 percent less for the same shipment. Can you match their rate?")
+        self.assertEqual(db.session(tid)["status"], "meeting_proposed")
+        answer(tid, 2, "Hi Lena,\n\nCould you confirm by email whether your price stays as offered? If it\u2019s changed, please send the "
+                       "new all-in total.\n\nSara\nLindqvist Medtech")
+        s = db.session(tid)
+        self.assertEqual(s["status"], "quoted")                 # open again: the next mail can book
+        body = sent(tid)[-1]["body"]
+        self.assertIn("our price stays as offered: 432.00 EUR all-in, HAM to BOG", body)
+        self.assertIsNone(crm.get(tid))                         # a question books nothing
+        answer(tid, 3, "That\u2019s fine, we accept your offer. Please book the shipment now.")
+        self.assertIsNotNone(crm.get(tid))
+        self.assertNotEqual(db.session(tid)["status"], "needs_human")
+
+    def test_price_stays_question_after_our_best_rate_answer(self):
+        tid = 4280
+        quote(tid)                                              # small shipment: "this is our best rate", quote stays open
+        answer(tid, 1, "Another forwarder has quoted 9 percent less. Can you match their rate?")
+        self.assertEqual(db.session(tid)["status"], "quoted")
+        answer(tid, 2, "Could you confirm by email whether your price stays as offered? If it\u2019s changed, please send the new all-in total.")
+        self.assertEqual(db.session(tid)["status"], "quoted")
+        self.assertIn("our price stays as offered: 432.00 EUR", sent(tid)[-1]["body"])
+
+    def test_a_time_for_the_call_or_another_question_still_goes_to_a_person(self):
+        tid = 4290
+        quote(tid)
+        with mock.patch.object(handlers, "MEETING_MIN_EUR", handlers.Decimal("100")):
+            answer(tid, 1, "Another forwarder has quoted 9 percent less for the same shipment. Can you match their rate?")
+        answer(tid, 2, "Tuesday at 10:30 works for the call. Please add insurance and send the new all-in total.")
+        self.assertEqual(db.session(tid)["status"], "needs_human")
+        self.assertNotIn("stays as offered", sent(tid)[-1]["body"])
+
     def test_unclear_goes_to_human(self):
         tid = 5000
         quote(tid)

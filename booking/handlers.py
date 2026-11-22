@@ -425,6 +425,40 @@ VALIDITY_ANSWER = {
 def SIGNER_NAME():
     from llm.extract import SIGNER
     return SIGNER
+
+
+# After "another forwarder is 9 percent cheaper, can you match?" we keep the price (on a big shipment we offer a call).
+# 5U, 22 Nov 05:18 (request 39215): the customer then wrote "Could you confirm by email whether your price stays as
+# offered? If it's changed, please send the new all-in total." It was parked as an answer to the call offer. The answer
+# is a mail: yes, the price stays. The quote is open again, and the acceptance that follows is booked as usual.
+PRICE_STAYS_Q = re.compile(r"\b(price (?:stays|remains|still stands|holds|is unchanged|has changed|is still)|"
+                           r"(?:stays?|remains?|still) as (?:offered|quoted)|if it(?:['\u2019]s| is| has) changed|"
+                           r"(?:same|original|quoted) price (?:still )?(?:stands|applies|holds)|"
+                           r"preis (?:bleibt|gilt|unver[äa]ndert)|bleibt (?:es )?(?:bei|wie angeboten))\b", re.I)
+PRICE_STAYS = {
+    "en": "%s\n\nyes, our price stays as offered: %s %s all-in, %s to %s with %s. It has not changed. This is already our best "
+          "rate for this shipment, so I cannot go below it, but it is firm, and I can book it as soon as you give me the "
+          "go-ahead.\n\nBest regards\n%s\nAir Export",
+    "de": "%s\n\nja, unser Preis bleibt wie angeboten: %s %s all-in, %s nach %s mit %s. Er hat sich nicht geändert. Das ist "
+          "bereits unsere beste Rate für diese Sendung, darunter kann ich nicht gehen, aber der Preis steht, und ich buche, "
+          "sobald Sie mir das Go geben.\n\nViele Grüße\n%s\nLuftfracht Export",
+}
+BETTER_PRICE_NOTE = "customer wanted a better price"
+
+
+def confirm_price_by_mail(s, mail):
+    """'Does your price stay as offered?' after we declined to go lower: say yes by mail, keep the quote open."""
+    tid = s["thread_id"]
+    chosen, fields = json.loads(s["chosen"] or "null") or {}, json.loads(s["fields"] or "{}")
+    lang = "de" if (fields.get("language") or "").lower().startswith("de") else "en"
+    name = fields.get("customer_first_name")
+    hello = (("Hallo %s," if lang == "de" else "Hi %s,") % name) if name else ("Guten Tag," if lang == "de" else "Hello,")
+    body = PRICE_STAYS[lang] % (hello, chosen.get("total"), chosen.get("currency") or "EUR", chosen.get("origin"),
+                                chosen.get("destination"), chosen.get("airline"), SIGNER_NAME())
+    if not chosen.get("total") or not _reply_session(s, mail, body, "price_stays"):
+        return _needs_human(tid, mail["id"], "customer asked whether the price stays as offered: answer it by hand")
+    db.update_session(tid, status="quoted", note="customer asked whether the price stays as offered: confirmed by mail, the quote is open")
+    return db.event("price_confirmed_by_mail", tid, mail["id"], total=chosen.get("total"))
 AFTER_BOOKING = ("booking", "booked", "booking_requested", "confirmed")
 _THANKS_ONLY = re.compile(r"^\W*(?:(?:many |thank you|thanks|danke|vielen dank|merci|grazie|gracias|perfect|great|super|"
                           r"ok|noted|received|erhalten|top|wonderful|excellent)[\w\s,.!']{0,60})$", re.I)
@@ -765,6 +799,8 @@ def handle_follow_up(mail):
         db.update_session(tid, note="CUSTOMER ALSO ASKED: %s (book it, then arrange this by hand)" % wish[:160])
     if s["status"] == "meeting_proposed" and verdict != "decline":   # "Tue 10:00, please confirm" is not a booking
         if not books_after_call_offer(verdict, own_text(mail["body"], mail.get("subject"))):
+            if PRICE_STAYS_Q.search(own_text(mail["body"], mail.get("subject"))):    # "confirm by email whether your price stays"
+                return confirm_price_by_mail(s, mail)
             return _needs_human(tid, mail["id"], "customer answered our call offer (picked a time?): forwarder to follow up")
         db.update_session(tid, status="quoted", note="")    # no call needed: they take the quote as it is
         db.event("accept_after_call_offer", tid, mail["id"])
@@ -782,6 +818,8 @@ def handle_follow_up(mail):
             db.event("sending_docs_book_now", tid, mail["id"])   # accepted). Book NOW: the rate ID expires in ~15 min and a
             # second customer mail may never come (Kai's review of #36). The papers can follow the booking. (Riky)
         if verdict == "unclear":
+            if (s.get("note") or "").startswith(BETTER_PRICE_NOTE) and PRICE_STAYS_Q.search(own_text(mail["body"], mail.get("subject"))):
+                return confirm_price_by_mail(s, mail)            # same question after "this is our best rate"
             return _needs_human(tid, mail["id"], UNCLEAR_NOTE)
     # status == awaiting_docs and not a decline: the promised documents arrived -> proceed to book below
 
