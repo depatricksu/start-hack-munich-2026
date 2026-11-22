@@ -5,7 +5,7 @@
 // After it, the start screen fades, the conversation fills the page and the input glides to the bottom.
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowUp, RotateCcw, X } from "lucide-react";
+import { ArrowUp, ArrowLeft, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { RelayMark } from "@/components/logo";
 import { Card, CountUp, EASE, Item, Reveal, StatusBadge, eur, money, route, shortMail } from "@/components/v2/ui";
@@ -248,15 +248,17 @@ export function Ask({ stats, latest }: { stats: Stats; latest: LatestRow[] }) {
   // place in the DOM and glides from the middle to the bottom, the start screen fades, the answers fade in.
   return (
     <motion.div layoutScroll className={`scroll-thin relative h-full ${chatting ? "overflow-hidden" : "overflow-y-auto"}`}>
-      <AnimatePresence>
-        {chatting && (
-          <motion.button key="new" type="button" {...fade} onClick={() => { setMsgs([]); change(""); }} disabled={busy}
-            className="btn btn-ghost absolute right-5 top-4 z-10 h-7 text-[12px]">
-            <RotateCcw size={12} /> New conversation
-          </motion.button>
-        )}
-      </AnimatePresence>
-      <div className={`relative mx-auto flex max-w-[720px] flex-col px-6 ${chatting ? "h-full" : "min-h-full"}`}>
+      {/* The conversation opens in one large glass pane. The arrow closes it and brings the start screen back. */}
+      <div className={`relative mx-auto flex flex-col px-6 ${chatting ? "lg my-3 h-[calc(100%-1.5rem)] max-w-[900px] rounded-[28px]" : "min-h-full max-w-[720px]"}`}>
+        <AnimatePresence>
+          {chatting && (
+            <motion.button key="back" type="button" {...fade} onClick={() => { setMsgs([]); change(""); }} disabled={busy}
+              aria-label="Back: close this conversation"
+              className="lg lg-pill absolute left-4 top-4 z-10 disabled:opacity-40">
+              <ArrowLeft size={15} /> Back
+            </motion.button>
+          )}
+        </AnimatePresence>
         <AnimatePresence mode="popLayout" initial={false}>
           {chatting ? (
             <motion.div key="chat" initial={{ opacity: 0 }} animate={{ opacity: 1, transition: { duration: 0.35, delay: 0.15, ease: EASE } }}

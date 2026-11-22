@@ -94,7 +94,7 @@ export function Notifications({ inline = false }: { inline?: boolean }) {
       <button onClick={() => setOpen((v) => !v)} aria-expanded={open}
         aria-label={`Notifications, ${unread.length} unread`}
         className={inline
-          ? "relative flex h-7 w-7 items-center justify-center rounded-full border border-[var(--hair-2)] text-[var(--fg-2)] transition-colors hover:text-[var(--fg)]"
+          ? "relative flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] text-[var(--fg-2)] transition-colors hover:text-[var(--fg)]"
           : "relative flex h-9 w-9 items-center justify-center rounded-xl glass text-zinc-300 hover:text-white"}>
         <Bell size={inline ? 14 : 17} aria-hidden />
         {unread.length > 0 && (
