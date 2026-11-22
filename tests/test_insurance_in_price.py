@@ -29,6 +29,17 @@ class Insurance(unittest.TestCase):
                                           "insured at 110%, premium rate 0.35%.")["premium"], "32.73")
         self.assertEqual(insurance.wanted("Bitte inklusive Transportversicherung anbieten: Warenwert 22.000 EUR, versichert zu 110 %, Prämiensatz 0,40 %.")["premium"], "96.80")
 
+    def test_round_92_wording(self):
+        """Live 01:13 (thr 26767), missed and rejected too_low: no "include", no "value" before the amount."""
+        said = ("Hi there,\n\nCould you send me an all-in price in EUR for the fastest air freight option to GRU?\n\nIt\u2019s 6 pieces, "
+                "671 kg and 6.19 cbm.\n\nWe also need cargo insurance inside your all-in price: the goods are worth 81000 EUR, cover is "
+                "110 % of the value and the premium rate is 0.30 % (our frame agreement).\n\nCheers,\nKlaus")
+        self.assertEqual(insurance.wanted(said), {"value": "81000", "pct": "110", "rate": "0.30", "premium": "267.30"})
+        for more, premium in (("Our cargo must be insured: 45000 EUR worth of goods, coverage 110 %, premium 0.25 %.", "123.75"),
+                              ("Insurance please, as always: 12,500 EUR, 110 %, 0.5 %.", "68.75"),
+                              ("Die Transportversicherung soll im Preis sein: Ware im Wert von 30.000 EUR, Deckung 110 %, Prämie 0,35 %.", "115.50")):
+            self.assertEqual((insurance.wanted("Please quote 300 kg FRA to JFK.\n\n" + more) or {}).get("premium"), premium, more)
+
     def test_no_terms_or_no_wish_adds_nothing(self):
         self.assertIsNone(insurance.wanted("Please quote 300 kg FRA to JFK. Is cargo insurance available?"))
         self.assertIsNone(insurance.wanted("Please include cargo insurance in the all-in price."))                       # no value, no rate
