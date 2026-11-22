@@ -11,7 +11,7 @@ import csv, json, os, re, time
 from decimal import Decimal
 
 from core import config, db, mailbox
-from pricing import price as sheets
+from pricing import price as sheets, insurance
 from shared.rfq import Level, _declared_dg, from_fields, validate
 import dg
 from llm import extract as llm_extract
@@ -109,7 +109,7 @@ def handle(tid, mail, fields):
 
     # Cargo insurance inside each shipment's all-in price (5U 01:07, rounds 91/92 were single shipments; this is the
     # same wish on a request with several). Values that cannot be matched to the shipments go to a person.
-    terms = insurance.wanted_many(mail.get("body") or "", len(parts))
+    terms = insurance.wanted_many(mail.get("body") or "", len(parts), [[p["best"]["destination"]] for p in parts])
     if terms == insurance.UNCLEAR:
         why = "multi_shipment: cargo insurance asked, but the goods values cannot be matched to the %d shipments" % len(parts)
         db.update_session(tid, status="needs_human", note=why)
