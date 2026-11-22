@@ -12,7 +12,7 @@ from decimal import Decimal
 from . import attachments, config, db, mailbox, safety, offer_file
 from router.route import route
 from llm import extract as llm
-from pricing import price as sheets
+from pricing import price as sheets, insurance
 from sourcing import portal
 from actions import queue as actions            # take-over queue: sends human replies typed in the UI
 from shared.rfq import gate as rfq_gate
@@ -400,6 +400,11 @@ def finalize(tid):
     else:
         best = min(options, key=lambda x: Decimal(x["total_eur"]))
     best = quote_in_eur(best)
+    asked_mail = db.con().execute("SELECT body FROM mails WHERE id=?", (tid,)).fetchone()
+    ins = insurance.wanted(asked_mail[0] if asked_mail else "")   # "include cargo insurance in the all-in price: value, 110 %, 0.40 %"
+    if ins:
+        best = insurance.add(best, ins)
+        db.event("insurance", tid, **ins)
     if fields.get("dg") and dg.mode() == "human":
         return needs_human(tid, None, "dangerous goods: " + dg.describe(fields["dg"]))
     if not db.claim_for_sending(tid):                        # someone already quoted this thread
@@ -408,6 +413,8 @@ def finalize(tid):
     body, why = llm.final_reply(s["reply_template"], best, fields, s["customer"], tid)   # llm/: filled + quality gate
     best, body, _ = dg.apply(best, fields, body)            # DG paragraph (and surcharge if DG_MODE=surcharge)
     body = dg.note(fields, body)                             # "priced on your packing list: 1729 kg, not 1210 kg"
+    if ins:                                                  # say what is in the price, before polish adds "not included"
+        body = llm._add_expert_note(body, insurance.sentence(ins, llm.reply_lang(fields)), str(best["total"]))
     try:                                                     # last human touch (Riky): signed name, answer their asks
         first = db.con().execute("SELECT body FROM mails WHERE id=?", (tid,)).fetchone()
         body, touched = humanize.polish(body, fields, best, first[0] if first else "")
