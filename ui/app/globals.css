@@ -127,3 +127,30 @@ button:disabled { cursor: not-allowed; }
 @keyframes v2-shimmer { 0% { background-position: -200px 0; } 100% { background-position: 200px 0; } }
 .v2 .skeleton { background: linear-gradient(90deg, #141414 0, #1c1c1c 40px, #141414 80px) #141414; background-size: 400px 100%; animation: v2-shimmer 1.4s ease-in-out infinite; border-radius: 6px; }
 @media (prefers-reduced-motion: reduce) { .v2 .skeleton { animation: none; } }
+
+/* ───────────── Relay v2: liquid glass (Erik, 22 Nov) ─────────────
+   Top bar, overview tiles and pill buttons are translucent panes: they blur what is behind them, carry a bright
+   hairline on the top edge and a soft shadow below. Monochrome on purpose: colour stays for state only.
+   The page gets a very soft light from the top corners so the glass has something to bend. */
+.v2 {
+  background:
+    radial-gradient(1100px 520px at 10% -10%, rgba(255, 255, 255, 0.06), transparent 62%),
+    radial-gradient(900px 480px at 94% -6%, rgba(255, 255, 255, 0.04), transparent 60%),
+    var(--bg);
+}
+.v2 .lg {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.03) 55%, rgba(255, 255, 255, 0.05));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), inset 0 -1px 0 rgba(255, 255, 255, 0.04), 0 14px 34px -16px rgba(0, 0, 0, 0.85);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  backdrop-filter: blur(24px) saturate(160%);
+}
+.v2 .card.lg { border-radius: 22px; }
+.v2 .lg-pill {
+  display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 18px; border-radius: 9999px;
+  font-size: 13px; font-weight: 500; color: var(--fg); transition: transform 0.15s, filter 0.15s;
+}
+.v2 .lg-pill:hover { filter: brightness(1.35); }
+.v2 .lg-pill:active { transform: scale(0.97); }
+/* The four dots of "What happened" while a request is still being worked on. */
+.v2 .load-dots i { background: var(--fg); }
