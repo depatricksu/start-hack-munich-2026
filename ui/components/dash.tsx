@@ -165,6 +165,10 @@ function DoneRow({ q }: { q: QueueItem }) {
   );
 }
 
+const DONE_SHOWN = 5;
+const SHIP_SHOWN = 5;
+const TABLE_SHOWN = 5; // bottom tables: the top five; the rest is one question to Ask Relay away
+
 function Queue({ d, now }: { d: DashData; now: number }) {
   const { needs, flight, done, doneTotal } = d.queue;
   const head = (t: string, n: number, tone: Tone) => (
@@ -181,12 +185,13 @@ function Queue({ d, now }: { d: DashData; now: number }) {
         {head("In flight", flight.length, "progress")}
         {flight.length ? <div>{flight.map((q) => <FlightRow key={q.id} q={q} now={now} />)}</div>
           : <p className="px-3 py-1 text-sm text-zinc-500">No open requests.</p>}
-        {head("Done", doneTotal, "over")}
-        {done.length ? <div>{done.map((q) => <DoneRow key={q.id} q={q} />)}</div>
+        {/* The full list is the Requests page; here only the newest few, as a sign of life. */}
+        {head("Just finished", Math.min(done.length, DONE_SHOWN), "over")}
+        {done.length ? <div>{done.slice(0, DONE_SHOWN).map((q) => <DoneRow key={q.id} q={q} />)}</div>
           : <p className="px-3 py-1 text-sm text-zinc-500">Nothing finished yet.</p>}
-        {doneTotal > done.length && (
+        {doneTotal > DONE_SHOWN && (
           <Link href="/requests" className="mt-1 inline-flex items-center gap-1 px-3 py-1.5 text-xs text-zinc-400 hover:text-white">
-            Show all <span className="num">{doneTotal}</span><ArrowRight size={12} />
+            All <span className="num">{doneTotal}</span> finished<ArrowRight size={12} />
           </Link>
         )}
       </div>
@@ -265,11 +270,11 @@ function Shipments({ d }: { d: DashData }) {
   const arcs = d.shipments.slice(0, 10).map((s) => ({ key: s.ref, from: s.origin, to: s.destination, tone: (s.step === "Delivered" ? "over" : "won") as "won" | "over" }));
   return (
     <Panel title="Shipments in motion" caption="step + ETA simulated from booking time + transit days · no live flight feed"
-      right={d.shipmentsTotal > 0 ? <span className="num text-xs text-zinc-500">{d.shipments.length} latest of {d.shipmentsTotal} bookings</span> : undefined}>
+      right={d.shipmentsTotal > 0 ? <Link href="/shipments" className="inline-flex items-center gap-1 text-xs text-zinc-400 hover:text-white">All <span className="num">{d.shipmentsTotal}</span> shipments<ArrowRight size={12} /></Link> : undefined}>
       {d.shipments.length === 0 ? <p className="text-sm text-zinc-500">No confirmed bookings yet.</p> : (
         <div className="grid grid-cols-[minmax(0,0.72fr)_minmax(0,1.28fr)] gap-4">
           <div className="flex items-center rounded-xl bg-black/20 p-2"><WorldMap arcs={arcs} className="h-auto w-full" /></div>
-          <div className="rail max-h-[340px] overflow-y-auto">
+          <div>
             <table className="w-full text-left text-sm">
               <thead className="sticky top-0 bg-[#0d0e10]/90 backdrop-blur">
                 <tr className="num text-[10px] uppercase tracking-wider text-zinc-500">
@@ -279,7 +284,7 @@ function Shipments({ d }: { d: DashData }) {
                 </tr>
               </thead>
               <tbody>
-                {d.shipments.map((s) => (
+                {d.shipments.slice(0, SHIP_SHOWN).map((s) => (
                   <tr key={s.ref} className="border-t border-line align-top">
                     <td className="py-2 pl-2">
                       <Link href={reqHref(s.thread)} className="num text-[13px] text-emerald-300 hover:underline">{s.ref}</Link>
@@ -311,12 +316,12 @@ const Th = ({ children, right }: { children: React.ReactNode; right?: boolean })
 const n0 = (v: number | null, suf = "") => (v == null ? "—" : `${Math.round(v).toLocaleString("en-GB")}${suf}`);
 
 function Pricing({ d }: { d: DashData }) {
-  const rows = [...d.pricing.lanes, d.pricing.total];
+  const rows = [...d.pricing.lanes.slice(0, TABLE_SHOWN), d.pricing.total];
   return (
     <Panel title="Pricing" caption="customers who asked for the cheapest">
       {d.pricing.total.quotes === 0 ? <p className="text-sm text-zinc-500">No priced quotes yet.</p> : (
         <table className="w-full text-sm">
-          <thead><tr><Th>Lane</Th><Th right>Quotes</Th><Th right>Cheapest</Th><Th right>Over</Th></tr></thead>
+          <thead><tr><Th>Lane</Th><Th right>Quotes</Th><Th right>Cheapest</Th></tr></thead>
           <tbody>
             {rows.map((r, i) => (
               <tr key={r.lane} className={`border-t border-line ${i === rows.length - 1 ? "text-white" : "text-zinc-300"}`}>
@@ -325,13 +330,12 @@ function Pricing({ d }: { d: DashData }) {
                 <td className="num text-right text-[13px]" title={`${r.cheapest} of ${r.asks} cheapest-asks got the cheapest option`}>
                   {r.asks ? `${Math.round((r.cheapest / r.asks) * 100)}%` : "—"} <span className="text-zinc-600">{r.asks ? `${r.cheapest}/${r.asks}` : ""}</span>
                 </td>
-                <td className="num text-right text-[13px]">{r.medianOverPct == null ? "—" : `+${r.medianOverPct.toFixed(1)}%`}</td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
-      <p className="mt-2 text-[11px] text-zinc-500">Cheapest = our quote was the lowest option we found. Over = median % above it.</p>
+      <p className="mt-2 text-[11px] text-zinc-500">Cheapest = we quoted the lowest price we found.</p>
     </Panel>
   );
 }
@@ -340,12 +344,13 @@ function Carriers({ d }: { d: DashData }) {
   return (
     <Panel title="Carriers" caption="flagged first · price requests by mail">
       {d.carriers.length === 0 ? <p className="text-sm text-zinc-500">No bids asked yet.</p> : (
-        <table className="w-full text-sm">
-          <thead><tr><Th>Carrier</Th><Th right>Replied</Th><Th right>Median reply</Th><Th right>Median price</Th></tr></thead>
+        <table className="w-full table-fixed text-sm">
+          <colgroup><col /><col className="w-14" /><col className="w-14" /><col className="w-[4.5rem]" /></colgroup>
+          <thead><tr><Th>Carrier</Th><Th right>Replied</Th><Th right>Reply</Th><Th right>Price</Th></tr></thead>
           <tbody>
-            {d.carriers.map((c) => (
+            {d.carriers.slice(0, TABLE_SHOWN).map((c) => (
               <tr key={`${c.carrier}-${c.role}`} className="border-t border-line text-zinc-300">
-                <td className="max-w-[170px] py-1.5">
+                <td className="py-1.5 pr-2">
                   <div className="flex items-center gap-1.5 truncate text-[13px]">
                     {c.flag && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${c.flag === "red" ? "bg-red-400" : "bg-amber-400"}`} />}
                     <span className="truncate">{c.carrier}</span>
@@ -354,9 +359,9 @@ function Carriers({ d }: { d: DashData }) {
                     {c.flag ? c.reasons[0] : c.role === "ratedesk" ? "rate desk" : c.role}
                   </div>
                 </td>
-                <td className="num text-right text-[13px]">{c.replied}<span className="text-zinc-600">/{c.asked}</span></td>
-                <td className="num text-right text-[13px]">{c.medianReplyS == null ? "—" : ago(c.medianReplyS)}</td>
-                <td className="num text-right text-[13px]">{c.medianEur == null ? "—" : `${n0(c.medianEur)} EUR`}</td>
+                <td className="num whitespace-nowrap text-right text-[13px]">{c.replied}<span className="text-zinc-600">/{c.asked}</span></td>
+                <td className="num whitespace-nowrap text-right text-[13px]">{c.medianReplyS == null ? "—" : ago(c.medianReplyS)}</td>
+                <td className="num whitespace-nowrap text-right text-[13px]">{c.medianEur == null ? "—" : `${n0(c.medianEur)} €`}</td>
               </tr>
             ))}
           </tbody>
@@ -373,7 +378,7 @@ function Customers({ d }: { d: DashData }) {
         <table className="w-full text-sm">
           <thead><tr><Th>Customer</Th><Th right>Requests</Th><Th right>Accepted</Th><Th right>Lang</Th></tr></thead>
           <tbody>
-            {d.customers.map((c) => (
+            {d.customers.slice(0, TABLE_SHOWN).map((c) => (
               <tr key={c.customer} className="border-t border-line text-zinc-300">
                 <td className="max-w-[170px] truncate py-1.5 text-[13px]" title={c.customer}>{shortMail(c.customer)}</td>
                 <td className="num text-right text-[13px]"><Link href="/requests" className="hover:text-white">{c.requests}</Link></td>

@@ -2,7 +2,9 @@
 import { useEffect, useState } from "react";
 import { EXPIRY_S, Option, Status } from "@/lib/types";
 
-// Glass monochrome: white = done, faint glass = in progress/attention. No red, no pulsing.
+// Glass monochrome, with one colour: green = won (booked, confirmed), the same green the dashboard uses.
+// White = quote is out, faint glass = in progress or over. No red, no pulsing.
+const WON = "bg-emerald-400/12 text-emerald-300 ring-emerald-400/25";
 const CHIP: Record<Status, { label: string; cls: string; dot?: boolean }> = {
   new: { label: "New", cls: "bg-white/8 text-zinc-300 ring-white/10", dot: true },
   waiting_bids: { label: "Waiting for bids", cls: "bg-white/8 text-zinc-300 ring-white/10", dot: true },
@@ -10,8 +12,8 @@ const CHIP: Record<Status, { label: string; cls: string; dot?: boolean }> = {
   quoted: { label: "Quoted", cls: "bg-white text-black ring-white" },
   booking: { label: "Booking", cls: "bg-white/8 text-zinc-300 ring-white/10", dot: true },
   booking_requested: { label: "Booking requested", cls: "bg-white/8 text-zinc-300 ring-white/10", dot: true },
-  booked: { label: "Booked", cls: "bg-white text-black ring-white" },
-  confirmed: { label: "Confirmed", cls: "bg-white text-black ring-white" },
+  booked: { label: "Booked", cls: WON },
+  confirmed: { label: "Confirmed", cls: WON },
   lost: { label: "Lost", cls: "bg-white/5 text-zinc-500 ring-white/10" },
   needs_human: { label: "Needs you", cls: "bg-white/14 text-white ring-white/25" },
   expired: { label: "Expired", cls: "bg-white/5 text-zinc-500 ring-white/10" },

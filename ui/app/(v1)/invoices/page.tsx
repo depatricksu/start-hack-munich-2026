@@ -95,7 +95,7 @@ export default function InvoicesPage() {
             <h1 className="text-xl font-semibold tracking-tight text-white">Invoices</h1>
             <p className="mt-0.5 text-sm text-zinc-500">
               Written the day the airline confirms. {d.totals.mailed === 0
-                ? "Drafts only: invoice mails to customers are switched off."
+                ? "Mailing them to customers is switched off for now."
                 : `${d.totals.mailed} sent to customers.`}
             </p>
           </div>

@@ -293,16 +293,22 @@ function OptionsTable({ options, chosen }: { options: Option[]; chosen: Option |
   );
 }
 
-function QuoteCard({ chosen, options }: { chosen: Option; options: Option[] }) {
+// The badge answers "did we give the customer what they asked for?": the fastest flight when they wanted
+// fast, the lowest price otherwise. "% over cheapest" is only shown when a cheapest-ask was not the cheapest.
+function QuoteCard({ chosen, options, prefer }: { chosen: Option; options: Option[]; prefer?: string | null }) {
   const best = bestOption(options);
   const overBest = best && !sameOption(chosen, best) && Number(best.total_eur) > 0
     ? ((Number(chosen.total_eur) - Number(best.total_eur)) / Number(best.total_eur)) * 100 : 0;
+  const quickest = options.length ? Math.min(...options.map((o) => o.transit_days)) : chosen.transit_days;
+  const badge = prefer === "fastest"
+    ? (chosen.transit_days <= quickest ? "fastest option" : `${chosen.transit_days - quickest} days slower than fastest`)
+    : overBest > 0.1 ? `+${overBest.toFixed(1)}% over cheapest` : "cheapest option";
   return (
     <div className="rounded-2xl glass glass-hi p-6">
       <div className="flex items-start justify-between">
         <div className="num text-[11px] uppercase tracking-wide text-zinc-400">Our quote</div>
         <span className="rounded-full bg-white/8 px-2.5 py-1 text-xs font-medium text-zinc-300 ring-1 ring-inset ring-white/10">
-          {overBest > 0.1 ? `+${overBest.toFixed(1)}% over cheapest` : "cheapest option"}
+          {badge}
         </span>
       </div>
       <div className="num mt-2 text-6xl font-semibold tracking-tight text-white">{money(chosen.total, chosen.currency)}</div>
@@ -343,7 +349,7 @@ function Facts({ d }: { d: SessionDetail }) {
           <div className="flex items-center gap-2 text-sm font-semibold text-white">
             Needs you {note.code && <span className="num rounded bg-white/10 px-1.5 py-0.5 text-xs font-medium text-zinc-200">{note.code}</span>}
           </div>
-          <p className="mt-1 text-sm text-zinc-400">{note.text || "The system could not price this safely. Step in on the right."}</p>
+          <p className="mt-1 text-sm text-zinc-400">{note.text || "Relay could not price this safely. Write the answer on the right."}</p>
         </div>
       )}
 
@@ -354,16 +360,16 @@ function Facts({ d }: { d: SessionDetail }) {
         <Fact k="Language" v={LANG_FLAG[lang] ?? (lang ? lang.toUpperCase() : "?")} />
       </div>
 
-      {d.chosen && <QuoteCard chosen={d.chosen} options={d.options} />}
+      {d.chosen && <QuoteCard chosen={d.chosen} options={d.options} prefer={f.prefer} />}
 
       {(d.invoice || (d.watch && d.watch.length > 0)) && (
         <div className="grid gap-3">
           {d.invoice && (
             <a href="/invoices" className="flex items-center gap-3 rounded-2xl glass-2 px-5 py-3.5 transition hover:bg-white/5">
               <span className="text-[11px] uppercase tracking-wide text-zinc-500">Invoice</span>
-              <span className="num text-sm text-white">{d.invoice.number}</span>
-              <span className="num text-sm text-zinc-300">{money(String(d.invoice.amount), d.invoice.currency)}</span>
-              <span className={`ml-auto text-xs ${d.invoice.status === "paid" ? "text-emerald-300"
+              <span className="num whitespace-nowrap text-sm text-white">{d.invoice.number}</span>
+              <span className="num whitespace-nowrap text-sm text-zinc-300">{money(String(d.invoice.amount), d.invoice.currency)}</span>
+              <span className={`ml-auto whitespace-nowrap text-right text-xs ${d.invoice.status === "paid" ? "text-emerald-300"
                 : d.invoice.overdue_days > 0 || d.invoice.status === "overdue_human" ? "text-red-300"
                 : d.invoice.status === "paid_reported" ? "text-amber-300" : "text-sky-300"}`}>
                 {d.invoice.status === "paid" ? "Paid"
@@ -513,6 +519,10 @@ function Operator({ d }: { d: SessionDetail }) {
   useEffect(() => { setDraft(d.reply ?? ""); setErr(null); }, [d.thread_id, d.reply]);
   const alreadyQuoted = d.quoted_at != null;
   const pending = d.actions.some((a) => a.done_at == null);
+  // Relay answers on its own. Writing to the customer by hand is an override: open only when the request
+  // was handed to a person, otherwise behind one small link.
+  const needsYou = d.status === "needs_human" || d.status === "failed";
+  const [override, setOverride] = useState(needsYou);
 
   async function send() {
     setBusy(true); setErr(null);
@@ -538,8 +548,16 @@ function Operator({ d }: { d: SessionDetail }) {
 
       <StatusProgress d={d} />
 
+      {!override ? (
+        <button onClick={() => setOverride(true)} className="mt-5 self-start text-xs text-zinc-500 transition hover:text-zinc-300">
+          Override: write to the customer yourself
+        </button>
+      ) : (
       <div className="mt-5">
-        <h3 className="text-sm font-semibold text-white">Step in</h3>
+        <div className="flex items-baseline">
+          <h3 className="text-sm font-semibold text-white">{needsYou ? "Your answer" : "Override"}</h3>
+          {!needsYou && <button onClick={() => setOverride(false)} className="ml-auto text-xs text-zinc-500 hover:text-zinc-300">Close</button>}
+        </div>
         <p className="mt-1 text-xs leading-relaxed text-zinc-500">
           {alreadyQuoted
             ? "We already quoted. Your message goes out as a normal follow-up in the same thread."
@@ -551,11 +569,12 @@ function Operator({ d }: { d: SessionDetail }) {
         <button onClick={send} disabled={busy || !draft.trim()}
           className={`mt-2 w-full rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:opacity-40 ${
             alreadyQuoted ? "bg-white text-black hover:bg-zinc-200" : "bg-red-500/15 text-red-100 ring-1 ring-inset ring-red-500/30 hover:bg-red-500/25"}`}>
-          {busy ? "Queuing…" : alreadyQuoted ? "Send follow-up as human" : "Take over — send this quote"}
+          {busy ? "Queuing…" : alreadyQuoted ? "Send follow-up" : "Send this quote"}
         </button>
         {err && <p className="mt-2 text-xs text-zinc-400">{err}</p>}
         <p className="mt-2 text-[11px] text-zinc-600">The runner sends it within a second. The UI never sends mail itself.</p>
       </div>
+      )}
 
       {d.actions.length > 0 && (
         <div className="mt-5 border-t border-line pt-4">
@@ -607,7 +626,7 @@ function RequestsView() {
       <section className="flex-1 overflow-y-auto rounded-2xl glass">
         {detail?.session ? <Facts d={detail.session} /> : <div className="p-10 text-sm text-zinc-500">Select a request.</div>}
       </section>
-      {detail?.session && <Operator d={detail.session} />}
+      {detail?.session && <Operator key={detail.session.thread_id} d={detail.session} />}
     </div>
   );
 }

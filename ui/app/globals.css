@@ -83,3 +83,47 @@ button:disabled { cursor: not-allowed; }
 .rail::-webkit-scrollbar { width: 8px; }
 .rail::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 8px; }
 .rail::-webkit-scrollbar-track { background: transparent; }
+
+/* ───────────── Relay v2 (Vercel-style dark). Everything is scoped under .v2, so v1 is untouched. ─────────────
+   Rules: one accent (blue) for interaction and selection; green / amber / red only for state.
+   Radius: 6px controls, 12px cards, full for status badges. Mono only for numbers, codes and small labels. */
+.v2 {
+  --bg: #0a0a0a;
+  --bg-1: #0f0f0f;         /* cards */
+  --bg-2: #161616;         /* hover, inset */
+  --bg-3: #1f1f1f;         /* pressed, selected */
+  --hair: #1f1f1f;         /* 1px dividers */
+  --hair-2: #2e2e2e;       /* stronger borders, inputs */
+  --fg: #ededed;           /* primary text  (17:1) */
+  --fg-2: #a1a1a1;         /* secondary text (8:1) */
+  --fg-3: #8a8a8a;         /* tertiary text (5.6:1, still AA) */
+  --accent: #3291ff;
+  --accent-soft: rgba(50, 145, 255, 0.14);
+  --ok: #3ecf8e;  --ok-soft: rgba(62, 207, 142, 0.12);
+  --warn: #f5a623; --warn-soft: rgba(245, 166, 35, 0.12);
+  --bad: #ff6166; --bad-soft: rgba(255, 97, 102, 0.12);
+  background: var(--bg);
+  color: var(--fg);
+}
+.v2 ::selection { background: #ededed; color: #0a0a0a; }
+.v2 .card {
+  background: var(--bg-1);
+  border: 1px solid var(--hair);
+  border-radius: 12px;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.3), 0 8px 16px -8px rgba(0, 0, 0, 0.5);
+}
+.v2 .hair { border-color: var(--hair); }
+.v2 .eyebrow { font-family: var(--font-geist-mono), ui-monospace, monospace; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg-3); }
+.v2 .tnum { font-family: var(--font-geist-mono), ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+.v2 .btn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 6px; font-size: 13px; font-weight: 500; transition: background 0.15s, color 0.15s, transform 0.1s; }
+.v2 .btn:active:not(:disabled) { transform: scale(0.98); }
+.v2 .btn-primary { background: var(--fg); color: #0a0a0a; }
+.v2 .btn-primary:hover:not(:disabled) { background: #cfcfcf; }
+.v2 .btn-ghost { background: transparent; color: var(--fg-2); border: 1px solid var(--hair-2); }
+.v2 .btn-ghost:hover:not(:disabled) { background: var(--bg-2); color: var(--fg); }
+.v2 .btn:disabled { opacity: 0.4; }
+.v2 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.v2 .scroll-thin { scrollbar-width: thin; scrollbar-color: #2a2a2a transparent; }
+@keyframes v2-shimmer { 0% { background-position: -200px 0; } 100% { background-position: 200px 0; } }
+.v2 .skeleton { background: linear-gradient(90deg, #141414 0, #1c1c1c 40px, #141414 80px) #141414; background-size: 400px 100%; animation: v2-shimmer 1.4s ease-in-out infinite; border-radius: 6px; }
+@media (prefers-reduced-motion: reduce) { .v2 .skeleton { animation: none; } }

@@ -272,13 +272,13 @@ function ShipmentsView() {
       <div className="mx-auto max-w-[1400px] space-y-3 px-2 py-3">
         <div className="px-1">
           <h1 className="text-xl font-semibold tracking-tight text-white">Shipments</h1>
-          <p className="mt-0.5 text-sm text-zinc-500">Everything after the customer said yes. Messages are drafts for you to read; nothing is sent from here.</p>
+          <p className="mt-0.5 text-sm text-zinc-500">Everything after the customer said yes: booking, airline confirmation, customer updates, invoice.</p>
         </div>
 
         <div className="grid grid-cols-4 gap-3">
           <Tile label="Active shipments" value={String(t.active)} sub={t.cancelled ? `${t.cancelled} cancelled` : "booked or confirmed"} />
           <Tile label="Waiting for airline" value={String(t.waiting)} sub="booked, not confirmed yet" tone={t.waiting ? "text-sky-300" : "text-white"} />
-          <Tile label="Messages to send" value={String(t.drafts)} sub="drafts after the yes" tone={t.drafts ? "text-amber-300" : "text-white"} />
+          <Tile label="Customer informed" value={`${t.informed} / ${t.active}`} sub="told about their booking by Relay" tone={t.informed ? "text-emerald-300" : "text-white"} />
           <Tile label="Invoiced / paid" value={`${t.invoiced} / ${t.paid}`} sub="invoices written / paid" tone={t.paid ? "text-emerald-300" : "text-white"} />
         </div>
 
@@ -304,7 +304,6 @@ function ShipmentsView() {
                   </div>
                   <div className="mt-1.5 flex items-center gap-3">
                     <Strip r={r} />
-                    {r.drafts > 0 && <span className="num ml-auto text-[11px] text-zinc-500">{r.drafts} drafts</span>}
                   </div>
                 </button>
               ))}

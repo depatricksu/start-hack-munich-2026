@@ -36,7 +36,7 @@ export type ShipmentDetail = ShipmentRow & {
 };
 export type ShipmentsData = {
   available: boolean;
-  totals: { active: number; waiting: number; drafts: number; invoiced: number; paid: number; cancelled: number };
+  totals: { active: number; waiting: number; informed: number; drafts: number; invoiced: number; paid: number; cancelled: number };
   rows: ShipmentRow[];
 };
 
@@ -478,7 +478,7 @@ function prepare() {
   return { now, flags: flagMap(), invoices, sessions: sessionsOf(), events: eventsByThread() };
 }
 
-const EMPTY: ShipmentsData = { available: false, totals: { active: 0, waiting: 0, drafts: 0, invoiced: 0, paid: 0, cancelled: 0 }, rows: [] };
+const EMPTY: ShipmentsData = { available: false, totals: { active: 0, waiting: 0, informed: 0, drafts: 0, invoiced: 0, paid: 0, cancelled: 0 }, rows: [] };
 
 export function getShipments(): ShipmentsData {
   if (!hasTable("bookings")) return EMPTY;
@@ -494,6 +494,7 @@ export function getShipments(): ShipmentsData {
     totals: {
       active: live.length,
       waiting: live.filter((r) => r.status === "booked").length,
+      informed: live.filter((r) => r.steps.find((s) => s.key === "informed")?.done).length,
       drafts: rows.reduce((a, r) => a + r.drafts, 0),
       invoiced: inv.filter(Boolean).length,
       paid: live.filter((r) => r.steps.find((s) => s.key === "paid")?.done).length,
