@@ -5,7 +5,7 @@ Each shipment is checked and priced on its own (sheets + portal), then ONE reply
 Anything we cannot price safely (door pickup without bids, unknown lane, missing data) -> needs_human, nothing sent.
 
 The session's `chosen` stays one dict (UI and booking read it): airline "A + B", total = sum, source "multi",
-plus `parts` = the chosen option per shipment. Booking sends multi accepts to a human for now.
+plus `parts` = the chosen option per shipment, numbered. booking/parts.py books the shipments the customer names.
 """
 import csv, json, os, re, time
 from decimal import Decimal
@@ -119,6 +119,8 @@ def handle(tid, mail, fields):
             p["best"] = insurance.add(p["best"], t)
     if terms:
         db.event("insurance", tid, mail["id"], shipments=terms)
+    for n, p in enumerate(parts, 1):                         # booking/parts.py books each shipment by its number
+        p["best"] = dict(p["best"], n=n, kg=p["shipment"]["weight_kg_total"], cbm=p["shipment"]["volume_cbm_total"])
     total = sum(Decimal(p["best"]["total_eur"]) for p in parts)
     chosen = {"airline": " + ".join(p["best"]["airline"] for p in parts), "total": "%.2f" % total,
               "total_eur": "%.2f" % total, "currency": "EUR",

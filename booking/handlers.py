@@ -19,7 +19,7 @@ Booking paths:
 import csv, json, os, re, time
 from decimal import Decimal
 from core import config, db, mailbox
-from . import crm, meeting, replies
+from . import crm, meeting, parts, replies
 
 _KIT = os.path.join(config.ROOT, "kit", "start-kit")
 AIRLINE_EMAIL = {r["name"].lower(): r["email"] for r in csv.DictReader(open(os.path.join(_KIT, "carrier-list.csv")))
@@ -340,17 +340,21 @@ def _fresh_rate(chosen, fields):
     return r if status == 200 else None
 
 
-def book_portal(tid, chosen, fields):
-    """POST the booking. Returns (status word, booking dict or reason)."""
+def book_portal(tid, chosen, fields, reference=None):
+    """POST the booking. Returns (status word, booking dict or reason). reference: an own team reference for one
+    shipment of a several-shipments quote (booking/parts.py), GOOGLE-<thread>-<n>."""
     if config.DRY_RUN:
         fake = {"booking_reference": "BK-DRYRUN%02d" % (tid % 100), "price": chosen["total"],
                 "currency": chosen["currency"], "airline": chosen["airline"], "airline_code": chosen.get("airline_code")}
+        if reference:                                            # one shipment of several: its own number, the flight's price
+            fake.update(booking_reference=fake["booking_reference"] + reference.rsplit("-", 1)[-1],
+                        price=chosen.get("flight_total") or chosen["total"])
         db.event("booking_dry_run", tid, rate_id=chosen["rate_id"])
         return "booked", fake
     rate_id = chosen["rate_id"]
     for attempt in range(2):
         status, r = mailbox.api("POST", "/v1/portal/bookings",
-                                body={"rate_id": rate_id, "team_reference": crm.team_reference(tid)})
+                                body={"rate_id": rate_id, "team_reference": reference or crm.team_reference(tid)})
         db.event("booking_call", tid, status=status, rate_id=rate_id, response=r)
         if status in (200, 201):
             return "booked", r
@@ -737,6 +741,8 @@ def handle_follow_up(mail):
     if s and s["status"] == "reprice_proposed" and mail["sender"] == (s["customer"] or "").lower():
         return reprice_answer(s, mail)                           # yes or no to the airline's new price
     if s and s["status"] in AFTER_BOOKING and mail["sender"] == (s["customer"] or "").lower():
+        if parts.open_parts(s) and parts.after_booking(dict(s), mail):   # "we can now confirm the second shipment, book it"
+            return None
         return after_booking(s, mail)                            # cancel / new date / complaint: never silently dropped
     if not s or s["status"] not in ("quoted", "meeting_proposed", "awaiting_docs"):
         return db.event("follow_up_ignored", tid, mail["id"], status=s and s["status"])
@@ -769,6 +775,8 @@ def handle_follow_up(mail):
         return handle_better_price(s, mail)
     if verdict == "faster":
         return handle_faster(s, mail)
+    if s["status"] == "quoted" and parts.open_parts(s):  # several shipments in one quote: book the ones they name now
+        return parts.on_quote(dict(s), mail, verdict)    # ("book the first now, we will confirm the second later")
     if s["status"] != "awaiting_docs":                   # on a quote still open, a soft/unclear reply does not book
         if verdict == "sending_docs":                    # "we'll send the DG papers" IS the yes for 5U (rounds 39-41 counted
             db.event("sending_docs_book_now", tid, mail["id"])   # accepted). Book NOW: the rate ID expires in ~15 min and a
@@ -780,7 +788,7 @@ def handle_follow_up(mail):
     chosen, fields = (json.loads(s["chosen"] or "null") or chosen_from_reply(s)), json.loads(s["fields"] or "{}")
     if not chosen:                                             # quote sent by a human with a price we cannot match
         return _needs_human(tid, mail["id"], "no_chosen_quote: customer accepted a quote sent by a human, book by hand")
-    if chosen.get("parts"):                                    # several shipments (pricing/multi.py): book by hand for now
+    if chosen.get("parts"):                                    # several shipments whose DG papers just arrived: a person books
         return _needs_human(tid, mail["id"], "multi_shipment accepted: book each part by hand: " + "; ".join(
             "%s-%s %s %s EUR" % (p["origin"], p["destination"], p["airline"], p["total_eur"]) for p in chosen["parts"]))
     base = dict(customer=s["customer"], subject=s["subject"], last_customer_mail_id=mail["id"],
@@ -866,6 +874,8 @@ def handle_booking_confirmation(mail):
         b = None
     if b and b["status"] == "requested" and mail["sender"] != AIRLINE_EMAIL.get((b["airline"] or "").lower()):
         b = None                                                 # mail booking: only the airline we asked confirms
+    if not b and ref and not AIRLINE_NO.search(text) and parts.confirmation(mail, ref.group(0)):
+        return None                                              # the second booking of a several-shipments quote
     if not b:
         return db.event("confirmation_unmatched", mail["thread_id"], mail["id"], subject=mail["subject"])
     if AIRLINE_NO.search(text):                                  # "Booking BK-... cancelled: no capacity" is NOT a confirmation

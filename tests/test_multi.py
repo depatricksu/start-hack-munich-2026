@@ -69,14 +69,22 @@ class TestMulti(unittest.TestCase):
         self.assertEqual(s["status"], "needs_human")
         self.assertIn("door pickup", s["note"])
 
-    def test_accept_goes_to_human_with_parts(self):
+    def test_the_shipments_are_numbered_for_booking(self):
+        chosen = json.loads(run(9007, form(self.SH))["chosen"])
+        self.assertEqual([(p["n"], p["kg"], p["cbm"]) for p in chosen["parts"]], [(1, 90.0, 0.4), (2, 120.0, 0.6)])
+
+    def test_yes_to_two_sheet_airlines_books_the_first_by_mail_and_names_the_second(self):
+        """booking/parts.py: the CRM has one row per thread, so only one booking by mail can wait for its airline."""
         run(9005, form(self.SH))
         reply = main.mailbox.normalize({"id": 9006, "from": CUSTOMER, "subject": "Re: Two shipments",
                                         "body": "Great, please book both.", "references": [9005], "in_reply_to": 9005})
         main.process(reply)
         s = db.session(9005)
         self.assertEqual(s["status"], "needs_human")
-        self.assertIn("multi_shipment accepted", s["note"])
+        self.assertIn("shipment 2 (DFW) is with sheet airline", s["note"])
+        self.assertIn("BOOKED: shipment 1 BOG requested by mail", s["note"])
+        self.assertIn("Shipment 1 (HAM to BOG", sent(9005)[-1]["body"])
+        self.assertNotIn("Shipment 2 is booked", sent(9005)[-1]["body"])
 
 
 def packing_list(text):
