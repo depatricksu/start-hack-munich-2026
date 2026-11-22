@@ -500,6 +500,9 @@ def after_booking(s, mail):
     text = own_text(mail["body"], mail.get("subject"))
     if AUTO_REPLY.search(text):
         return db.event("after_booking_auto_reply", tid, mail["id"])
+    from booking import invoice
+    if invoice.on_customer_mail(s, mail, text):                  # "we have paid" / "please send the invoice again"
+        return None
     kind = next((k for k, rx in POST_BOOKING if rx.search(text)), None)
     if not kind and STATUS_Q.search(text):                       # "where is my shipment?": answer from the booking, like tracking
         from booking import tracking
@@ -579,6 +582,7 @@ def cancel_booking(s, mail, text, force=False):
     lang = "de" if (b.get("language") or "").lower().startswith("de") else "en"
     _reply_session(s, mail, CANCEL_DONE[lang] % (ref, b.get("airline") or "the airline", SIGNER), "booking_cancelled")
     db.event("booking_cancelled", tid, mail["id"], booking_reference=ref)
+    _cancel_invoice(tid, "customer cancelled")
     return True
 
 
@@ -868,6 +872,30 @@ def handle_follow_up(mail):
         db.update_session(tid, status="booking_requested")
         kind = "requested"
     _tell_customer(crm.get(tid), kind)
+    _watch_carriers(tid, chosen)
+
+
+def _cancel_invoice(tid, why):
+    try:
+        from booking import invoice
+        invoice.cancel(tid, why)
+    except Exception as e:
+        db.event("invoice_error", tid, error=str(e))
+
+
+def _watch_carriers(tid, chosen):
+    """Booked with an airline or trucker that keeps causing trouble (monitor/carriers.py, red flag): put
+    'WATCH CARRIER ...' on this shipment so the forwarder can act early (chase the confirmation, line up a backup).
+    Information only: the booking stands and nothing is sent. Never breaks the booking."""
+    try:
+        from monitor import carriers
+        note = carriers.watch_note(chosen.get("airline"), chosen.get("trucker"))
+        if note:
+            s = db.session(tid)
+            db.update_session(tid, note=((s and s["note"] or "") + " | " + note).strip(" |"))
+            db.event("carrier_watch", tid, note=note)
+    except Exception as e:
+        db.event("carrier_watch_error", tid, error=str(e))
 
 
 # An airline / portal mail about a booking that says NO. Before, every "Booking BK-..." mail counted as confirmed and the
@@ -920,6 +948,7 @@ def handle_booking_confirmation(mail):
         crm.upsert(b["thread_id"], status="cancelled_by_airline", raw={"airline_mail": text[:1500]})
         db.update_session(b["thread_id"], status="needs_human",
                           note="AIRLINE CANCELLED/REFUSED the booking: rebook and tell the customer. Airline: %s" % text.replace("\n", " ")[:400])
+        _cancel_invoice(b["thread_id"], "airline cancelled")
         return db.event("booking_cancelled_by_airline", b["thread_id"], mail["id"], sender=mail["sender"],
                         booking_reference=ref and ref.group(0))
     if b["status"] == "confirmed":
@@ -940,3 +969,8 @@ def handle_booking_confirmation(mail):
     db.update_session(b["thread_id"], status="confirmed")
     db.event("booking_confirmed", b["thread_id"], mail["id"], booking_reference=ref and ref.group(0))
     _tell_customer(crm.get(b["thread_id"]), "confirmed")
+    try:                                                         # cash flow: invoice the day the airline confirms
+        from booking import invoice
+        invoice.issue(b["thread_id"])
+    except Exception as e:
+        db.event("invoice_error", b["thread_id"], error=str(e))
