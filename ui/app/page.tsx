@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { computeStats, getSessions } from "@/lib/data";
+import { getSessions } from "@/lib/data";
 import { CommandBar } from "@/components/command-bar";
 import { StatusChip } from "@/components/bits";
 import { QUOTE_SENT, Session } from "@/lib/types";
@@ -27,12 +27,11 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 export default function Dashboard() {
   const { sessions } = getSessions();
-  const s = computeStats(sessions);
   const quotes = sessions.filter((x) => x.chosen && QUOTE_SENT.includes(x.status));
   const sold = quotes.length;
   const revenue = quotes.reduce((a, x) => a + priceOf(x), 0);
   const avgPrice = sold ? revenue / sold : 0;
-  const avgResp = s.response_times.length ? Math.round(s.response_times.reduce((a, b) => a + b, 0) / s.response_times.length) : null;
+  const customers = new Set(sessions.map((x) => x.customer.toLowerCase())).size;
   const latest = (quotes.length ? quotes : sessions).slice(0, 4);
 
   return (
@@ -41,14 +40,14 @@ export default function Dashboard() {
       <div className="mx-auto flex min-h-full max-w-2xl flex-col justify-center px-6 py-16">
         <div className="text-center">
           <h1 className="text-[2rem] font-semibold tracking-tight text-white">Ask Relay.</h1>
-          <p className="mt-2 text-[15px] text-zinc-500">A quote, a status, or what needs you. In plain words.</p>
+          <p className="mt-2 text-[15px] text-zinc-500">Find any case in plain words: a lane, a customer, a booking, a status, a word from the mail.</p>
         </div>
         <div className="mt-6"><CommandBar /></div>
 
         <div className="mt-10 grid grid-cols-4 gap-3">
           <Stat label="Quotes sold" value={String(sold)} />
           <Stat label="Avg / quote" value={sold ? eur(avgPrice) : "—"} />
-          <Stat label="Avg response" value={avgResp == null ? "—" : `${avgResp}s`} />
+          <Stat label="Customers" value={String(customers)} />
           <Stat label="Revenue" value={eur(revenue)} />
         </div>
 

@@ -36,10 +36,7 @@ function useClock(): number {
 
 export function Countdown({ receivedAt, quotedAt, status }: { receivedAt: number; quotedAt: number | null; status: Status }) {
   const now = useClock();
-  if (quotedAt) {
-    const s = Math.round(quotedAt - receivedAt);
-    return <span className="num text-xs text-zinc-300">quoted in {s}s</span>;
-  }
+  if (quotedAt) return <span className="num text-xs text-zinc-400">{when(receivedAt)}</span>;
   if (status === "expired") return <span className="num text-xs text-zinc-500">expired</span>;
   const left = Math.round(receivedAt + EXPIRY_S - now);
   if (left <= 0) return <span className="num text-xs text-zinc-500">expired</span>;
@@ -52,15 +49,12 @@ export function BigClock({ receivedAt, quotedAt, status }: { receivedAt: number;
   const settled = status === "expired" || status === "failed" || status === "lost";
 
   if (quotedAt) {
-    const s = Math.round(quotedAt - receivedAt);
+    // A forwarder wants the dates, not how many seconds the system took.
     return (
-      <div>
-        <div className="flex items-baseline gap-2">
-          <span className="num text-4xl font-semibold tracking-tight text-white">{s}s</span>
-          <span className="text-sm text-zinc-500">to quote</span>
-        </div>
-        <div className="mt-1 text-xs text-zinc-500">{s <= 120 ? "Full time points (under 120 s)" : "Over 120 s"}</div>
-      </div>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
+        <dt className="text-zinc-500">Request in</dt><dd className="num text-right text-zinc-200">{when(receivedAt)}</dd>
+        <dt className="text-zinc-500">Quote sent</dt><dd className="num text-right text-white">{when(quotedAt)}</dd>
+      </dl>
     );
   }
 
@@ -73,17 +67,18 @@ export function BigClock({ receivedAt, quotedAt, status }: { receivedAt: number;
     <div>
       <div className="flex items-baseline gap-2">
         <span className={`num text-4xl font-semibold tracking-tight ${expired ? "text-zinc-500" : "text-white"}`}>{expired ? "0:00" : `${m}:${String(s).padStart(2, "0")}`}</span>
-        <span className="text-sm text-zinc-500">{expired ? "expired" : "until this RFQ expires"}</span>
+        <span className="text-sm text-zinc-500">{expired ? "expired" : "left to answer"}</span>
       </div>
       <div className="mt-2 h-1.5 w-full rounded-full bg-white/10">
         <div className={`h-1.5 rounded-full transition-all ${expired ? "bg-white/25" : "bg-white/70"}`} style={{ width: `${pct}%` }} />
       </div>
-      <div className="mt-1 flex justify-between text-[11px] text-zinc-500">
-        <span className="num">{Math.round(elapsed)}s elapsed</span>
-        <span>full points under 120 s</span>
-      </div>
+      <div className="mt-1 text-[11px] text-zinc-500">Request in <span className="num">{when(receivedAt)}</span></div>
     </div>
   );
+}
+
+export function when(ts: number): string {
+  return new Date(ts * 1000).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
 export function money(total: string, currency = "EUR") {

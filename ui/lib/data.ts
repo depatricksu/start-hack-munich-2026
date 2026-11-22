@@ -5,12 +5,12 @@ import { ActionRow, EventRow, FileRef, MailRow, QUOTE_SENT, Session, SessionDeta
 
 export type Source = "live" | "demo";
 
-function parse<T>(v: unknown, fallback: T): T {
+export function parse<T>(v: unknown, fallback: T): T {
   if (typeof v !== "string" || !v) return fallback;
   try { return JSON.parse(v) as T; } catch { return fallback; }
 }
 
-function rowToSession(r: Record<string, unknown>): Session {
+export function rowToSession(r: Record<string, unknown>): Session {
   return {
     thread_id: r.thread_id as number, customer: (r.customer as string) ?? "", subject: (r.subject as string) ?? "",
     status: (r.status as Session["status"]) ?? "new",

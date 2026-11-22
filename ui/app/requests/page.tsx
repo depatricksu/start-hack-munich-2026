@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
 import { Check, ChevronDown, FileSpreadsheet, FileText, Mic, Paperclip } from "lucide-react";
 import { BigClock, Countdown, LANG_FLAG, StatusChip, bestOption, money, sameOption } from "@/components/bits";
@@ -7,11 +8,28 @@ import { FileRef, Option, Session, SessionDetail, Status } from "@/lib/types";
 
 type Source = "live" | "demo";
 
+// What happened, in a forwarder's words. Internal steps (style picks, safety gates, alarms, retries) are not
+// listed: a code a forwarder cannot read is left out rather than shown raw.
 const EVENT_LABEL: Record<string, string> = {
-  mail_in: "Mail received", llm: "Read by the AI", options: "Prices found", waiting_bids: "Waiting for carrier bids",
-  bid_wait_over: "Bid wait over", quote_sent: "Quote sent", mail_out: "Mail sent", mail_out_dry_run: "Mail prepared (dry run)",
-  needs_human: "Handed to a human", rfq_expired: "Request expired", portal_error: "Portal error", error: "Error",
-  quote_skipped_already_sent: "Second quote blocked",
+  mail_in: "Mail received", rfq_in_attachment: "Request read from the attachment", attachments: "Attachments read",
+  translated: "Translated", llm: "Request read", unit_fix: "Units converted to kg / cbm",
+  origin_from_pickup: "Departure airport chosen from the pickup address", same_as_earlier: "Same cargo as an earlier request",
+  dg: "Dangerous goods checked", insurance: "Insurance added", lookalike_sender: "Fake sender caught",
+  clarify_asked: "Asked the customer for missing details", clarify_answer: "Customer sent the missing details",
+  bid_requested: "Asked carriers for prices", bid_mail_out: "Asked carriers for prices", bid_received: "Carrier price received",
+  waiting_bids: "Waiting for carrier prices", bid_wait_over: "Carrier prices in", bids_merged: "Carrier prices compared",
+  bid_picked: "Trucker chosen", trucker_estimate: "Trucking estimated",
+  options: "Prices compared", multi_options: "Prices compared per shipment", portal_hold: "Waiting for airline prices",
+  portal_down: "Airline prices unavailable", portal_estimate: "Price estimated", deadline: "Answer deadline set",
+  quote_sent: "Quote sent", offer_file: "Offer PDF attached", requote: "New quote sent", follow_up: "Customer replied",
+  follow_up_ignored: "Customer replied, no action needed", follow_up_nudge: "Reminder sent",
+  price_confirmed_by_mail: "Price confirmed to the customer", meeting_proposed: "Call offered",
+  booking_call: "Flight booked with the airline", booked: "Flight booked", booking_confirmed: "Airline confirmed the booking",
+  customer_informed: "Customer informed", sending_docs_book_now: "Booked, documents to follow", awaiting_docs: "Waiting for documents",
+  tracking_lookup: "Customer asked for status", tracking_answered: "Status sent to the customer",
+  booking_cancel_call: "Booking cancelled with the airline", booking_cancelled: "Booking cancelled",
+  after_booking_cancellation: "Customer cancelled", status_corrected: "Status corrected",
+  needs_human: "Handed to you", human_action: "Answered by a person", rfq_expired: "Request expired",
 };
 
 function useJson<T>(url: string | null, every = 2000): T | null {
@@ -164,13 +182,13 @@ const WHO: Record<string, { label: string; side: "customer" | "other" }> = {
   tracking: { label: "Tracking", side: "other" }, spam: { label: "Spam", side: "other" },
 };
 
+// Where a price came from, as a forwarder says it.
+function sourceName(src: string): string {
+  return ({ sheet: "Rate sheet", portal: "Airline portal", bid: "Carrier offer", ratedesk: "Rate desk", estimate: "Estimate" } as Record<string, string>)[src] ?? src;
+}
+
 function clock(ts: number): string {
   return new Date(ts * 1000).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-}
-function since(ts: number, start: number): string {
-  const s = Math.round(ts - start);
-  if (s <= 0) return "";
-  return s < 120 ? `+${s} s` : s < 7200 ? `+${Math.round(s / 60)} min` : `+${Math.round(s / 3600)} h`;
 }
 
 function Body({ text }: { text: string }) {
@@ -199,7 +217,6 @@ function Thread({ d }: { d: SessionDetail }) {
     items.push({ key: "reply", ts: d.quoted_at ?? last + 0.001, side: "us", label: "Our reply", sender: "sent by Relay", body: d.reply, files: d.reply_files });
   }
   items.sort((x, y) => x.ts - y.ts);
-  const start = items.length ? items[0].ts : d.received_at;
   return (
     <details open className="group rounded-2xl glass-2 p-5">
       <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-semibold text-white [&::-webkit-details-marker]:hidden">
@@ -218,7 +235,7 @@ function Thread({ d }: { d: SessionDetail }) {
                   <span className={`font-semibold ${us ? "text-white" : other ? "text-zinc-300" : "text-zinc-200"}`}>{it.label}</span>
                   <span className="min-w-0 truncate text-zinc-500">{it.sender}</span>
                   <span className="num ml-auto shrink-0 pl-2 text-zinc-500" title={new Date(it.ts * 1000).toLocaleString("en-GB")}>
-                    {clock(it.ts)}{since(it.ts, start) && <span className="ml-1.5 text-zinc-600">{since(it.ts, start)}</span>}
+                    {clock(it.ts)}
                   </span>
                 </div>
                 <Body text={it.body} />
@@ -251,7 +268,7 @@ function OptionsTable({ options, chosen }: { options: Option[]; chosen: Option |
   return (
     <table className="w-full text-sm">
       <thead><tr className="text-left text-[11px] uppercase tracking-wide text-zinc-500">
-        <th className="py-1 font-medium">Airline</th><th className="font-medium">Source</th><th className="font-medium">Days</th><th className="text-right font-medium">Total</th>
+        <th className="py-1 font-medium">Airline</th><th className="font-medium">From</th><th className="font-medium">Days</th><th className="text-right font-medium">Total</th>
       </tr></thead>
       <tbody>
         {sorted.map((o, i) => {
@@ -264,7 +281,7 @@ function OptionsTable({ options, chosen }: { options: Option[]; chosen: Option |
                 {isChosen && <span className="ml-2 rounded bg-white px-1.5 py-0.5 text-[10px] font-semibold text-black">QUOTED</span>}
                 {isBest && !isChosen && <span className="ml-2 rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-300">CHEAPEST</span>}
               </td>
-              <td className="text-zinc-500">{o.source}</td>
+              <td className="text-zinc-500">{sourceName(o.source)}</td>
               <td className="num text-zinc-300">{o.transit_days}</td>
               <td className="num text-right text-zinc-200">{money(o.total, o.currency)}</td>
             </tr>
@@ -288,7 +305,7 @@ function QuoteCard({ chosen, options }: { chosen: Option; options: Option[] }) {
         </span>
       </div>
       <div className="num mt-2 text-6xl font-semibold tracking-tight text-white">{money(chosen.total, chosen.currency)}</div>
-      <div className="mt-2 text-sm text-zinc-400">{chosen.airline} · {chosen.transit_days} days transit · via {chosen.source}</div>
+      <div className="mt-2 text-sm text-zinc-400">{chosen.airline} · {chosen.transit_days} days transit · {sourceName(chosen.source)}</div>
     </div>
   );
 }
@@ -356,7 +373,8 @@ function StatusProgress({ d }: { d: SessionDetail }) {
   const pct = PROGRESS[d.status] ?? 12;
   const steps: string[] = [];
   for (const e of d.events) {
-    const label = EVENT_LABEL[e.kind] ?? e.kind;
+    const label = EVENT_LABEL[e.kind];
+    if (!label) continue;
     if (steps[steps.length - 1] !== label) steps.push(label);
   }
   const done = d.status === "quoted" || d.status === "booked" || d.status === "confirmed";
@@ -368,8 +386,7 @@ function StatusProgress({ d }: { d: SessionDetail }) {
   return (
     <div className="mt-4 rounded-2xl glass-2 p-4">
       <div className="flex items-center justify-between">
-        <h4 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Live status</h4>
-        <span className="num text-xs text-zinc-400">{pct}%</span>
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">What happened</h4>
       </div>
       <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-white/10 ring-1 ring-inset ring-white/5">
         <motion.div className={`h-full rounded-full ${done ? "bg-white" : "bar-soft"}`}
@@ -498,7 +515,13 @@ function Operator({ d }: { d: SessionDetail }) {
 
 // ---------- Page ----------
 
+// /requests?id=123 opens that request (links from the dashboard and from Ask Relay). useSearchParams needs Suspense.
 export default function RequestsPage() {
+  return <Suspense fallback={null}><RequestsView /></Suspense>;
+}
+
+function RequestsView() {
+  const urlId = Number(useSearchParams().get("id")) || null;
   const list = useJson<{ source: Source; sessions: Session[] }>("/api/sessions");
   const [sel, setSel] = useState<number | null>(null);
   const sessions = useMemo(() => list?.sessions ?? [], [list]);
@@ -511,7 +534,7 @@ export default function RequestsPage() {
     if (prevLen.current != null && n > prevLen.current) setNewCount((c) => c + (n - (prevLen.current as number)));
     if (n > 0 || prevLen.current != null) prevLen.current = n;
   }, [sessions.length]);
-  const activeId = sel ?? sessions.find((s) => s.status === "needs_human")?.thread_id ?? sessions[0]?.thread_id ?? null;
+  const activeId = sel ?? (urlId && sessions.some((s) => s.thread_id === urlId) ? urlId : null) ?? sessions.find((s) => s.status === "needs_human")?.thread_id ?? sessions[0]?.thread_id ?? null;
   const detail = useJson<{ source: Source; session: SessionDetail | null }>(activeId ? `/api/sessions/${activeId}` : null);
 
   return (
