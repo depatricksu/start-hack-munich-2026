@@ -9,7 +9,7 @@ To add a feature, write a handler in your own folder and register it in HANDLERS
 """
 import csv, json, os, re, sys, time, traceback, urllib.error
 from decimal import Decimal
-from . import attachments, config, db, imports, lots, mailbox, safety, offer_file, recall, scope
+from . import attachments, config, db, imports, lots, mailbox, pickup, safety, offer_file, recall, scope
 from router.route import route, lookalike, ADDRESS_SWITCH
 from llm import extract as llm
 from pricing import price as sheets, insurance, customs
@@ -151,6 +151,10 @@ def origin_from_pickup(tid, fields):
 
 def price_and_quote(tid, mail, fields, asked=False):
     """Everything after the gateway call. Also re-entered by llm/clarify.py when the customer answered our question."""
+    try:                                                     # pickup wanted, only the town given (or a postcode the model
+        pickup.fill(tid, fields)                             # missed): the truck was left out of the price (5U 11:03)
+    except Exception as e:                                   # an extra: never lose the request over it
+        db.event("error", tid, mail["id"], error="pickup.fill: %s" % e)
     origin_from_pickup(tid, fields)
     postcode = str(fields.get("pickup_postcode") or "")
     weight, volume = fields.get("weight_kg_total") or 0, fields.get("volume_cbm_total") or 0

@@ -78,7 +78,8 @@ def lines(tid, session, best, fields, body, today=None):
            "To: %s" % (session.get("customer") or ""), "Your request: %s" % _latin(session.get("subject") or ""), "",
            "Route: %s (air freight)" % route]
     if fields.get("pickup_postcode") and best.get("trucker"):
-        out.append("Pickup: by truck from postcode %s to %s airport, included" % (fields["pickup_postcode"], route.split(" - ")[0]))
+        where = fields["pickup_area"] if fields.get("pickup_area") else "postcode %s" % fields["pickup_postcode"]   # the town they named
+        out.append("Pickup: by truck from %s to %s airport, included" % (where, route.split(" - ")[0]))
     if kg:
         out.append("Shipment: %s kg gross%s" % (("%g" % kg), (", %g cbm" % cbm) if cbm else ""))
     volume_kg = float(cbm or 0) * 167                          # the same rule the quote uses: 1 cbm = 167 kg
