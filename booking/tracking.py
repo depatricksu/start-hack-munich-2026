@@ -230,6 +230,19 @@ def not_found(lang="en"):
     return (NOT_FOUND_DE if lang == "de" else NOT_FOUND).replace("{SIGNER}", SIGNER)
 
 
+def _from_archive(mail, lang, tid):
+    """Not a live booking: maybe an OLD one the forwarder imported (history/importer.py). Never breaks tracking."""
+    try:
+        from history import find
+        body = find.archived_status(mail["subject"] + "\n" + mail["body"], lang)
+        if body:
+            db.event("tracking_from_archive", tid, mail["id"])
+        return body
+    except Exception as e:
+        db.event("tracking_archive_error", tid, mail["id"], error=str(e))
+        return None
+
+
 def handle(mail):
     tid = mail["thread_id"]
     b, how = find_booking(mail["subject"] + "\n" + mail["body"], mail)
@@ -237,7 +250,7 @@ def handle(mail):
              booking=b and {k: b[k] for k in ("thread_id", "booking_reference", "status")})
     from llm import lang as langmod
     lang = langmod.detect(mail["subject"] + "\n" + mail["body"]) or (b and b.get("language")) or "en"   # the customer's language
-    body = answer_text(b, tid, lang) if b else not_found(lang)
+    body = answer_text(b, tid, lang) if b else (_from_archive(mail, lang, tid) or not_found(lang))
     subject = mail["subject"] if mail["subject"].lower().startswith("re:") else "Re: " + mail["subject"]
     ok = mailbox.send(mail["sender"], subject, body, in_reply_to=mail["id"], thread_id=tid)
     db.event("tracking_answered" if ok else "tracking_failed", tid, mail["id"], matched=bool(b), how=how)
