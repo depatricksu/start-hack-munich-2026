@@ -9,7 +9,7 @@ To add a feature, write a handler in your own folder and register it in HANDLERS
 """
 import csv, json, os, re, sys, time, traceback, urllib.error
 from decimal import Decimal
-from . import attachments, config, db, imports, mailbox, safety, offer_file, recall
+from . import attachments, config, db, imports, mailbox, safety, offer_file, recall, scope
 from router.route import route, lookalike, ADDRESS_SWITCH
 from llm import extract as llm
 from pricing import price as sheets, insurance, customs
@@ -146,6 +146,8 @@ def price_and_quote(tid, mail, fields, asked=False):
     origin_from_pickup(tid, fields)
     postcode = str(fields.get("pickup_postcode") or "")
     weight, volume = fields.get("weight_kg_total") or 0, fields.get("volume_cbm_total") or 0
+    if scope.sea(mail):                                      # a container by sea: not ours, say so at once (5U 09:50)
+        return scope.decline_sea(tid, mail, fields)
     if len(fields.get("shipments") or []) > 1:               # several shipments in one mail (pricing/multi.py, Patrick)
         return multi.handle(tid, mail, fields)
     ok, note = rfq_gate(fields, mail)                       # shared/rfq.py (Patrick): stop or warn, with reason codes
