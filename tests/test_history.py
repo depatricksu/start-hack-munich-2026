@@ -139,5 +139,40 @@ class History(unittest.TestCase):
         self.assertIn("STR to SIN", out[-1]["body"])
 
 
+class Documents(unittest.TestCase):
+    """PDF attachments and loose papers: read, kind, linked to their case. OCR is tested by python3 -m history.demo."""
+
+    def test_request_only_in_a_pdf_and_a_loose_invoice(self):
+        from core import offer_file
+        from email.mime.application import MIMEApplication
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.text import MIMEText
+        d = tempfile.mkdtemp()
+        m = MIMEMultipart()
+        m["From"], m["To"], m["Subject"] = "Petra Lang <p.lang@lang-maschinen.de>", OURS, "Anfrage"
+        m["Date"], m["Message-ID"] = "Mon, 02 Jun 2025 08:00:00 +0200", "<pdf1@lang>"
+        m.attach(MIMEText("Guten Tag, Details im Anhang.", "plain", "utf-8"))
+        part = MIMEApplication(offer_file.pdf(["ANFRAGE LUFTFRACHT", "Von MUC nach DXB", "Gewicht: 410 kg", "Volumen: 2,1 cbm"]),
+                               _subtype="pdf")
+        part.add_header("Content-Disposition", "attachment", filename="Anfrage.pdf")
+        m.attach(part)
+        q = MIMEMultipart()
+        q["From"], q["To"], q["Subject"] = OURS, "p.lang@lang-maschinen.de", "Re: Anfrage"
+        q["Date"], q["Message-ID"], q["In-Reply-To"] = "Mon, 02 Jun 2025 09:00:00 +0200", "<pdf2@us>", "<pdf1@lang>"
+        q.attach(MIMEText("MUC to DXB with Vega Skyfreight: 1,480.00 EUR all-in. Booking BK-LANG0001 once you say yes.", "plain"))
+        with open(os.path.join(d, "box.mbox"), "wb") as f:
+            for x in (m, q):
+                f.write(b"From - Mon Jan  1 00:00:00 2025\n" + x.as_bytes() + b"\n\n")
+        with open(os.path.join(d, "vega_invoice.pdf"), "wb") as f:
+            f.write(offer_file.pdf(["VEGA SKYFREIGHT", "INVOICE VS-77", "Booking BK-LANG0001", "Amount due: 1,310.00 EUR"]))
+        r = importer.run([d], ours=[OURS], quiet=True)
+        self.assertEqual((r["attachments_read"], r["documents_read"], r["documents_linked"]), (1, 1, 1))
+        c = dict(importer.con().execute("SELECT * FROM archive_cases WHERE customer='p.lang@lang-maschinen.de'").fetchone())
+        self.assertEqual((c["origin"], c["destination"], c["weight_kg"]), ("MUC", "DXB", 410.0))   # read from the PDF only
+        kinds = {x[0]: x[1] for x in importer.con().execute("SELECT filename, kind FROM archive_docs WHERE case_key=?", (c["key"],))}
+        self.assertEqual(kinds, {"Anfrage.pdf": "request", "vega_invoice.pdf": "invoice"})
+        self.assertEqual([h["customer"] for h in find.search(["VS-77"]) if h["where"] == "archive"], ["p.lang@lang-maschinen.de"])
+
+
 if __name__ == "__main__":
     unittest.main()

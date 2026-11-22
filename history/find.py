@@ -3,7 +3,7 @@
     python3 -m history.find lindqvist ORD           # every word must match: customer, company, lane, goods, airline...
     python3 -m history.find BK-AW8CXJCM             # a reference: BK-, GOOGLE-, INV-, AWB
     python3 -m history.find weber 2025-03           # a month (or a day: 2025-03-14)
-    python3 -m history.find 820kg FRA JFK           # a weight (+-5%)
+    python3 -m history.find 820kg FRA JFK           # a weight (+-2%)
     python3 -m history.find --case mail:<id>        # one case with every mail of it, oldest first
     python3 -m history.find --duplicates            # requests sent twice, and what they were linked to
 
@@ -22,9 +22,14 @@ KG = re.compile(r"^(\d+(?:[.,]\d+)?)\s*kg$", re.I)
 
 def _rows():
     c = importer.con()
+    docs = {}
+    for k, kind, fn, text in c.execute("SELECT case_key, kind, filename, substr(text,1,3000) FROM archive_docs WHERE case_key IS NOT NULL"):
+        docs.setdefault(k, []).append("%s %s %s" % (kind, fn, text or ""))
     for r in c.execute("SELECT * FROM archive_cases"):
         d = dict(r)
         d["where"] = "archive"
+        d["docs_text"] = " ".join(docs.get(d["key"], []))
+        d["n_docs"] = len(docs.get(d["key"], []))
         yield d
     try:
         for r in c.execute("SELECT s.thread_id, s.customer, s.subject, s.status, s.fields, s.chosen, s.received_at, "
@@ -45,7 +50,7 @@ def _rows():
 
 def _hay(c):
     return " ".join(str(c.get(k) or "") for k in ("customer", "company", "subject", "origin", "destination", "commodity",
-                                                  "airline", "booking_reference", "refs", "status", "note")).lower()
+                                                  "airline", "booking_reference", "refs", "status", "note", "docs_text")).lower()
 
 
 def matches(c, words):
@@ -60,7 +65,7 @@ def matches(c, words):
             return False
         elif k:
             kg = float(k.group(1).replace(",", "."))
-            if not (c.get("weight_kg") and abs(c["weight_kg"] - kg) <= 0.05 * kg):
+            if not (c.get("weight_kg") and abs(c["weight_kg"] - kg) <= 0.02 * kg):
                 return False
         elif IATA.match(w):
             if w not in (c.get("origin"), c.get("destination")) and w.lower() not in hay:
@@ -130,6 +135,10 @@ def show_case(key):
               "currency", "airline", "booking_reference", "refs", "sources", "duplicate_of", "note"):
         if k.get(f) not in (None, "", "[]"):
             print("  %-18s %s" % (f, k[f]))
+    for d in c.execute("SELECT * FROM archive_docs WHERE case_key=? ORDER BY filename", (key,)):
+        first = " / ".join(l.strip() for l in (d["text"] or "").splitlines()[:3] if l.strip())
+        print("  document  %-34s %-20s %-5s linked by %-20s %s" % (d["filename"][:34], d["kind"], d["how"] or "-",
+                                                                  d["linked_by"] or "-", first[:90]))
     for m in c.execute("SELECT * FROM archive_mails WHERE case_key=? ORDER BY date", (key,)):
         when = dt.datetime.fromtimestamp(m["date"]).strftime("%Y-%m-%d %H:%M") if m["date"] else "?"
         tag = " (duplicate, kept %s)" % m["duplicate_of"] if m["duplicate_of"] else ""
@@ -149,6 +158,11 @@ def _line(c):
 def main(argv):
     if "--case" in argv:
         return show_case(argv[argv.index("--case") + 1])
+    if "--docs" in argv:
+        for d in importer.con().execute("SELECT * FROM archive_docs ORDER BY case_key IS NULL, filename"):
+            print("%-36s %-20s %-5s %-24s %s" % (d["filename"][:36], d["kind"], d["how"] or "-", d["linked_by"] or "NOT LINKED",
+                                                d["case_key"] or ""))
+        return
     if "--duplicates" in argv:
         for c in importer.con().execute("SELECT * FROM archive_cases WHERE duplicate_of IS NOT NULL ORDER BY first_at"):
             print(_line(dict(c, where="archive")))

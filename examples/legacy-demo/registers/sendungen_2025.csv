@@ -1,0 +1,5 @@
+Datum;Kunde;Von;Nach;Gewicht;Preis;Währung;Airline;Buchungsnummer;Status
+03.03.2025;anna.sonnberg@sonnberg-kaffee.de;MUC;PVG;540;1.921,60;EUR;Meridian Freightways;BK-AW8CXJCM;geflogen
+20.01.2025;einkauf@alpen-pharma.de;STR;SIN;95;1.240,00;EUR;Solace Air Cargo;BK-OLD00042;geflogen
+20.01.2025;einkauf@alpen-pharma.de;STR;SIN;95;1.240,00;EUR;Solace Air Cargo;BK-OLD00042;geflogen
+10.02.2025;sales@nordlicht-audio.de;CGN;LIM;1745;4.760,00;EUR;Xenon Cargo Airlines;BK-NA552019;geflogen

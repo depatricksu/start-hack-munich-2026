@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS archive_cases(key TEXT PRIMARY KEY, customer TEXT, co
   destination TEXT, weight_kg REAL, volume_cbm REAL, pieces INTEGER, commodity TEXT, pickup_postcode TEXT, ready_date TEXT,
   price TEXT, currency TEXT, airline TEXT, booking_reference TEXT, refs TEXT, status TEXT, first_at REAL, last_at REAL,
   n_mails INTEGER, sources TEXT, duplicate_of TEXT, note TEXT, imported_at REAL);
+CREATE TABLE IF NOT EXISTS archive_docs(id TEXT PRIMARY KEY, case_key TEXT, mail_mid TEXT, filename TEXT, source TEXT,
+  kind TEXT, how TEXT, linked_by TEXT, bytes INTEGER, text TEXT, facts TEXT, imported_at REAL);
 """
 _KIT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "kit", "start-kit")
 CARRIERS = {r["email"].lower(): r["name"] for r in csv.DictReader(open(os.path.join(_KIT, "carrier-list.csv")))}
@@ -49,6 +51,9 @@ def _own(m):
     return own_text(m["body"], m["subject"])[:600]
 
 
+LOST = re.compile(r"\b(anders entschieden|buchen (?:wir )?nicht|(?:wir )?buchen nicht|kein (?:bedarf|interesse)|"
+                  r"anderen (?:anbieter|spediteur)|zu teuer|went with another|decided (?:against|otherwise)|no longer interested|"
+                  r"too expensive|we (?:will|'ll) pass)\b", re.I)
 CANCEL = re.compile(r"\b(cancel\w*|storn\w*|annul\w*|no longer needed|nicht mehr ben[öo]tigt)\b", re.I)
 CONFIRMED = re.compile(r"\b(booking\s+BK-\S+\s+(?:is\s+)?confirmed|confirmed|bestätigt)\b", re.I)
 
@@ -97,7 +102,25 @@ def _msg_record(msg, source):
             "recipients": ",".join(a for _, a in email.utils.getaddresses(msg.get_all("To", []) + msg.get_all("Cc", []))).lower(),
             "subject": str(msg.get("Subject") or ""), "body": _text_of(msg),
             "in_reply_to": (msg.get("In-Reply-To") or "").strip(), "refs": refs,
-            "files": [p.get_filename() for p in msg.walk() if p.get_filename()], "source": source}
+            "files": [p.get_filename() for p in msg.walk() if p.get_filename()], "source": source,
+            "docs": _attachments(msg, source)}
+
+
+def _attachments(msg, source):
+    """Every attached file read into text (PDF text layer, Word, Excel; scans and photos by OCR)."""
+    from . import documents
+    out = []
+    for p in msg.walk():
+        name = p.get_filename()
+        if not name:
+            continue
+        try:
+            data = p.get_payload(decode=True) or b""
+        except Exception:
+            data = b""
+        if data:
+            out.append(documents.from_bytes(data, name, source="%s / %s" % (source, name)))
+    return out
 
 
 def read_mbox(path):
@@ -131,14 +154,14 @@ def read_db(path):
         yield {"mid": link(r["id"]), "date": r["received_at"], "sender": (r["sender"] or "").lower(), "sender_name": "",
                "recipients": config.OUR_ADDRESS, "subject": r["subject"] or "", "body": r["body"] or "",
                "in_reply_to": link(r["thread_id"]) if reply else "", "refs": [link(r["thread_id"])] if reply else [],
-               "files": [], "source": name, "route": r["route"]}
+               "files": [], "source": name, "route": r["route"], "docs": []}
     for e in sent:
         d = json.loads(e["data"] or "{}")
         yield {"mid": "<db-%s-out-%s>" % (name, e["id"]), "date": e["ts"], "sender": config.OUR_ADDRESS, "sender_name": "",
                "recipients": (d.get("to") or "").lower(), "subject": d.get("subject") or "", "body": d.get("body") or "",
                "in_reply_to": link(e["thread_id"]) if e["thread_id"] else "", "refs": [link(e["thread_id"])] if e["thread_id"] else [],
                "files": [a.get("filename") for a in d.get("attachments") or []], "source": name,
-               "route": "carrier" if e["kind"] == "bid_mail_out" else "ours"}
+               "route": "carrier" if e["kind"] == "bid_mail_out" else "ours", "docs": []}
 
 
 COLS = {   # register column -> our field, by the headers forwarders actually use (en / de)
@@ -230,15 +253,19 @@ def _starts_from(path):
 
 
 def read_any(path):
-    """-> (mails, register rows) from a file or a folder."""
-    mails, rows = [], []
+    """-> (mails, register rows, documents) from a file or a folder."""
+    from . import documents
+    mails, rows, docs = [], [], []
     if os.path.isdir(path):
         for root, _, files in os.walk(path):
             for f in sorted(files):
-                m, r = read_any(os.path.join(root, f))
+                if f.startswith("."):
+                    continue
+                m, r, d = read_any(os.path.join(root, f))
                 mails += m
                 rows += r
-        return mails, rows
+                docs += d
+        return mails, rows, docs
     low = path.lower()
     if low.endswith(".eml"):
         mails += list(read_eml(path))
@@ -248,7 +275,9 @@ def read_any(path):
         mails += list(read_db(path))
     elif low.endswith((".csv", ".xlsx", ".xlsm", ".tsv")):
         rows += list(read_register(path))
-    return mails, rows
+    elif low.endswith(documents.DOC):
+        docs.append(documents.from_file(path))
+    return mails, rows, docs
 
 
 # ------------------------------------------------------------------------------------------------ sorting
@@ -351,12 +380,14 @@ def case_from_thread(t, ours):
         return None
     from shared import rfq
     from booking.handlers import classify
-    r = rfq.extract_rfq(first["subject"], first["body"])
+    att = "\n".join(d["text"] for d in first.get("docs") or [] if d["text"])
+    r = rfq.extract_rfq(first["subject"], first["body"] + ("\n" + att if att else ""))
     try:
         r = rfq.normalize(r)                                      # pickup postcode -> departure airport
     except Exception:
         pass
-    text_all = "\n".join("%s\n%s" % (m["subject"], m["body"]) for m in t)
+    text_all = "\n".join("%s\n%s\n%s" % (m["subject"], m["body"], "\n".join(d["text"] for d in m.get("docs") or []))
+                         for m in t)
     ours_after = [m for m in t if is_ours(m["sender"], ours) and (m["date"] or 0) >= (first["date"] or 0)]
     quote = next((m for m in ours_after if _money(m["body"])[0]), None)
     price, cur = _money(quote["body"]) if quote else (None, None)
@@ -396,6 +427,8 @@ def case_from_thread(t, ours):
                 v = classify(m["body"], m["subject"])
                 if status in ("booked", "confirmed", "cancelled"):
                     continue                                       # later mails (thanks, status) do not undo a booking
+                if v != "accept" and LOST.search(_own(m)):
+                    v = "decline"
                 status = {"accept": "booked", "sending_docs": "booked", "decline": "lost"}.get(v, status)
     if any(m["sender"] in CARRIERS and CONFIRMED.search(m["subject"] + " " + m["body"][:300]) for m in t) and status in ("booked", "quoted"):
         status = "confirmed"
@@ -487,11 +520,12 @@ def _same_shipment(a, b, days=5):
 def merge_cases(cases):
     """Register row + mail case of one shipment -> one case (the mail one, with the row's facts filled in).
     Two mail cases of one shipment (the customer sent the request again) -> the later one is a duplicate."""
-    cases = sorted(cases, key=lambda c: (c["first_at"] or 0, c["key"].startswith("row:")))
+    order = lambda c: 2 if c["key"].startswith("row:") else 1 if c["key"].startswith("doc:") else 0
+    cases = sorted(cases, key=lambda c: (order(c), c["first_at"] or 0))   # mail conversations first: they stay the case
     kept, merged, repeats = [], 0, 0
     for c in cases:
         twin = next((k for k in kept if _same_shipment(k, c)), None)
-        if twin and (c["key"].startswith("row:") or twin["key"].startswith("row:")):
+        if twin and (c["key"].startswith(("row:", "doc:")) or twin["key"].startswith(("row:", "doc:"))):
             for f in ("company", "origin", "destination", "weight_kg", "volume_cbm", "pieces", "commodity", "price", "currency",
                       "airline", "booking_reference"):
                 if not twin.get(f) and c.get(f):
@@ -499,8 +533,11 @@ def merge_cases(cases):
             twin["refs"] = sorted(set(twin["refs"]) | set(c["refs"]))
             twin["sources"] = sorted(set(twin["sources"]) | set(c["sources"]))
             twin["mids"] = twin["mids"] + c["mids"]
+            twin["n_mails"] = (twin["n_mails"] or 0) + (c["n_mails"] or 0)
+            twin["first_at"] = min(x for x in (twin["first_at"], c["first_at"]) if x) if (twin["first_at"] or c["first_at"]) else None
             if RANK.get(c["status"], 0) > RANK.get(twin["status"], 0):
                 twin["status"] = c["status"]
+            twin.setdefault("merged_keys", []).append(c["key"])
             merged += 1
             continue
         if twin and twin.get("quoted_at") and (c["first_at"] or 0) > twin["quoted_at"]:
@@ -516,11 +553,13 @@ def merge_cases(cases):
 
 # ------------------------------------------------------------------------------------------------ storing
 def run(paths, ours=None, dry=False, quiet=False):
-    mails, rows = [], []
+    from . import documents
+    mails, rows, docs = [], [], []
     for p in paths:
-        m, r = read_any(p)
+        m, r, d = read_any(p)
         mails += m
         rows += r
+        docs += d
     n_raw = len(mails)
     mails, dups = dedupe_mails(mails)
     ours = set(ours or []) or guess_ours(mails)
@@ -528,15 +567,51 @@ def run(paths, ours=None, dry=False, quiet=False):
     cases = [c for c in (case_from_thread(t, ours) for t in ts) if c]
     carrier_threads = len(ts) - len(cases)
     linked = link_carrier_threads(ts, cases, ours)
+    seen_docs, loose = set(), []
+    for d in docs:                                                # the same scan twice is one document
+        if d["id"] not in seen_docs:
+            seen_docs.add(d["id"])
+            loose.append(d)
+    paper = []
+    for d in loose:                                               # paper orders that are no mail case: shipments of their own
+        k, how = documents.link(d, cases)
+        if not k:
+            pc = documents.case_from_paper(d, documents.date_in(d["text"]))
+            if pc:
+                d["case_key"], d["linked_by"] = pc["key"], "paper is the case"
+                paper.append(pc)
     row_cases = [case_from_row(r) for r in rows]
     uniq_rows = {c["key"]: c for c in row_cases}
-    cases, merged, repeats = merge_cases(cases + list(uniq_rows.values()))
+    cases, merged, repeats = merge_cases(cases + paper + list(uniq_rows.values()))
     linked += link_carrier_threads(ts, cases, ours)                # register rows bring booking numbers: second pass
+    keys = {c["key"] for c in cases}
+    alias = {}
+    for c in cases:                                               # a paper case merged into a row / mail case
+        for src in c.get("merged_keys", []):
+            alias[src] = c["key"]
+    for d in loose:
+        if d.get("case_key") in alias:
+            d["case_key"] = alias[d["case_key"]]
+        if d.get("case_key") in keys:
+            continue
+        k, how = documents.link(d, cases)
+        d["case_key"], d["linked_by"] = (k["key"], how) if k else (None, None)
+        if k:
+            k["refs"] = sorted(set(k["refs"]) | set(d["facts"]["refs"]))
+            k["sources"] = sorted(set(k["sources"]) | {d["filename"]})
+    case_of_mail = {mid: k["key"] for k in cases for mid in k["mids"]}
+    att = [dict(d, mail_mid=m["mid"], case_key=case_of_mail.get(m["mid"]), linked_by="attached to the mail")
+           for m in mails for d in m.get("docs") or []]
     report = {"files": len(paths), "mails_read": n_raw, "duplicate_mails": len(dups), "mails_kept": len(mails),
               "conversations": len(ts), "carrier_only_conversations": carrier_threads,
               "carrier_conversations_linked_by_reference": linked, "register_rows": len(rows),
               "register_duplicate_rows": len(row_cases) - len(uniq_rows), "rows_merged_into_mail_cases": merged,
-              "requests_sent_twice": repeats, "cases": len(cases), "ours": sorted(ours),
+              "requests_sent_twice": repeats, "attachments_read": len(att),
+              "documents_read": len(docs), "documents_duplicate": len(docs) - len(loose),
+              "read_by_ocr": sum(1 for d in att + loose if d["how"] == "ocr"),
+              "documents_linked": sum(1 for d in loose if d.get("case_key")),
+              "cases_from_paper": sum(1 for c in cases if c["key"].startswith("doc:")),
+              "cases": len(cases), "ours": sorted(ours),
               "by_status": dict(sorted(defaultdict(int, {s: sum(1 for c in cases if c["status"] == s) for s in RANK}).items(),
                                        key=lambda x: -RANK[x[0]]))}
     if not dry:
@@ -562,6 +637,11 @@ def run(paths, ours=None, dry=False, quiet=False):
                        None if k["price"] is None else "%.2f" % k["price"], k["currency"], k["airline"], k["booking_reference"],
                        json.dumps(k["refs"]), k["status"], k["first_at"], k["last_at"], k["n_mails"], json.dumps(k["sources"]),
                        k.get("duplicate_of"), k.get("note"), now))
+        for d in att + loose:
+            c.execute("INSERT OR REPLACE INTO archive_docs(id,case_key,mail_mid,filename,source,kind,how,linked_by,bytes,text,"
+                      "facts,imported_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                      (d["id"], d.get("case_key"), d.get("mail_mid"), d["filename"], d["source"], d["kind"], d["how"],
+                       d.get("linked_by"), d["bytes"], d["text"], json.dumps(d["facts"]), now))
         db.event("history_import", **{x: report[x] for x in report if x != "ours"})
     if not quiet:
         print(json.dumps(report, indent=2))
