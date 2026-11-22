@@ -3,7 +3,8 @@
 // and never calls the 5U gateway. It talks to api.openai.com with OPENAI_API_KEY, or, when only RELAY_ASSISTANT_KEY
 // is set, to api.anthropic.com. OpenAI wins when both are set.
 import Anthropic from "@anthropic-ai/sdk";
-import { getDb } from "./db";
+import { spawnSync } from "node:child_process";
+import { DB_PATH, getDb } from "./db";
 import { getDetail } from "./data";
 import { search } from "./search";
 import { ChatError, OPENAI_DEFAULT_MODEL, runOpenAI } from "./openai-chat";
@@ -15,6 +16,18 @@ const ANTHROPIC_MODEL = "claude-opus-5-5";
 const EFFORT = (process.env.RELAY_ASSISTANT_EFFORT || "low") as "low" | "medium" | "high";
 const MAX_STEPS = 8;
 const CELL = 400;        // longest text cell a SQL result may return
+const QUERY_MS = 5000;   // a query_data statement that runs longer is killed
+// The whole program of the query process (see toolQuery). Read-only connection, one row at a time, capped.
+const QUERY_CHILD = `
+const { DatabaseSync } = require("node:sqlite");
+const { path, sql, cap } = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+try {
+  const db = new DatabaseSync(path, { readOnly: true });
+  const rows = []; let more = false;
+  for (const r of db.prepare(sql).iterate()) { if (rows.length >= cap) { more = true; break; } rows.push(r); }
+  process.stdout.write(JSON.stringify({ rows, more }, (k, v) => (typeof v === "bigint" ? Number(v) : v instanceof Uint8Array ? "[binary]" : v)));
+} catch (e) { process.stdout.write(JSON.stringify({ error: String(e && e.message || e) })); }
+`;
 const MAIL = 2500;       // longest mail body get_case returns (the rest is marked as cut)
 
 export type Turn = { role: "user" | "assistant"; text: string };
@@ -154,30 +167,28 @@ function toolCase(id: number) {
 function toolQuery(sql: string) {
   const q = String(sql).trim().replace(/;\s*$/, "");
   if (!/^(select|with)\b/i.test(q) || q.includes(";")) return { error: "Only one SELECT statement is allowed." };
-  // A recursive query can run forever. Nothing the assistant is asked needs one, and the query runs on the UI
-  // server's only thread, so it is refused (it could also come from text inside a mail).
-  if (/\brecursive\b/i.test(q)) return { error: "Recursive queries are not allowed. Use a plain SELECT." };
-  const db = getDb();
-  if (!db) return { error: "No data file." };
-  try {
-    // The connection is opened read-only (lib/db.ts), so nothing can be changed even by a crafted statement.
-    // Rows are read one at a time and reading stops at 200 rows or after 4 seconds: a query with huge output
-    // cannot fill the memory or hold the server.
-    const stmt = db.prepare(q);
-    const rows: Record<string, unknown>[] = [];
-    const started = Date.now();
-    let more = false;
-    for (const r of (typeof stmt.iterate === "function" ? stmt.iterate() : stmt.all()) as Iterable<Record<string, unknown>>) {
-      if (rows.length >= 200 || Date.now() - started > 4000) { more = true; break; }
-      rows.push(r);
-    }
-    return {
-      row_count: rows.length, more_rows_not_shown: more, shown: rows.length,
-      rows: rows.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, cut(v, CELL)]))),
-    };
-  } catch (e) {
-    return { error: `SQL failed: ${(e as Error).message}` };
+  if (!getDb()) return { error: "No data file." };
+  // The statement runs in its own short-lived process that is KILLED after 5 seconds. SQLite gives no way to stop
+  // a running statement from the same thread, and a query can run for ever without returning a single row (a
+  // self-referencing WITH, a count over a huge join), written by the model or prompted by text inside a mail.
+  // Inside this server that would hold its only thread for good; this way the worst case is a 5 second pause.
+  // The child opens the file read-only, reads rows one at a time and stops at 200.
+  const r = spawnSync(process.execPath, ["--no-warnings", "-e", QUERY_CHILD], {
+    input: JSON.stringify({ path: DB_PATH, sql: q, cap: 200 }), encoding: "utf8",
+    timeout: QUERY_MS, killSignal: "SIGKILL", maxBuffer: 16 * 1024 * 1024,
+  });
+  if (r.error || r.signal || r.status !== 0) {
+    const slow = r.signal === "SIGKILL" || (r.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT";
+    return { error: slow ? `The query ran longer than ${QUERY_MS / 1000} seconds and was stopped. Make it simpler: fewer joins, a WHERE, no self-referencing WITH.`
+      : "The query could not be run." };
   }
+  let out: { rows?: Record<string, unknown>[]; more?: boolean; error?: string };
+  try { out = JSON.parse(r.stdout); } catch { return { error: "The query result could not be read." }; }
+  if (out.error || !out.rows) return { error: `SQL failed: ${out.error ?? "no rows"}` };
+  return {
+    row_count: out.rows.length, more_rows_not_shown: !!out.more, shown: out.rows.length,
+    rows: out.rows.map((row) => Object.fromEntries(Object.entries(row).map(([k, v]) => [k, cut(v, CELL)]))),
+  };
 }
 
 function runTool(name: string, input: Record<string, unknown>): { result: unknown; label: string } {
