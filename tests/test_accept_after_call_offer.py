@@ -23,6 +23,22 @@ class AcceptAfterCallOffer(unittest.TestCase):
                      "In Ordnung, bitte buchen Sie die Sendung zum genannten Preis."):
             self.assertTrue(self.decide(said), said)
 
+    def test_a_polite_request_to_book_is_a_yes(self):
+        """Live 02:52 (round 108): read as 'unclear' because of the question mark, nothing was booked."""
+        real = ("Thanks for getting back to me\u2014that works for me, and I\u2019m happy to accept your offer. Could you go ahead and book the shipment "
+                "now, please?\n\nThanks a lot and have a lovely day!\nPetra Hofmann")
+        self.assertEqual(handlers.classify(real), "accept")
+        self.assertTrue(self.decide(real))
+        for said in ("We accept. Can you please book it?", "Sounds good, could you proceed with the booking?", "Agreed. Would you go ahead and book the shipment?",
+                     "Einverstanden. Könnten Sie die Sendung bitte buchen?"):
+            self.assertEqual(handlers.classify(said), "accept", said)
+
+    def test_a_request_that_changes_the_deal_is_still_a_question(self):
+        for said in ("Could you book it for Friday instead?", "We accept, but could you book it at 5000 EUR?", "Sounds good. Can you book it if the price drops?",
+                     "Agreed. Could you book a faster flight?", "Could you match their rate and book it?", "Can you book it? And what about insurance?",
+                     "Could you tell me when it arrives?"):
+            self.assertNotEqual(handlers.classify(said), "accept", said)
+
     def test_picking_a_time_stays_with_a_person(self):
         for said in ("Tuesday 09:00 works for us, please confirm.", "Mon 23 Nov at 10:30 is fine.", "Yes, let us have the call on Wednesday.",
                      "That works for us.", "Please book the call for Tuesday.", "Dienstag um 9 Uhr passt, bitte bestaetigen."):
