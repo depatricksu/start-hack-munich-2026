@@ -1,5 +1,5 @@
 // Demo data so every screen looks right before (and without) real traffic. Same shape as the real DB rows.
-import { Session, SessionDetail, EventRow, MailRow } from "./types";
+import { Session, SessionDetail, EventRow, MailRow, FileRef } from "./types";
 
 const now = () => Date.now() / 1000;
 
@@ -38,14 +38,22 @@ export function fakeSessions(): Session[] {
 export function fakeDetail(id: number): SessionDetail | null {
   const s = fakeSessions().find((x) => x.thread_id === id);
   if (!s) return null;
+  // The customer's request now arrives as a file: a PDF/Word, or a voice message we transcribe. Alternate so both show in demo.
+  const reqFiles: FileRef[] = id % 2 === 0
+    ? [{ filename: `RFQ-${s.fields.origin}-${s.fields.destination}.pdf`, bytes: 48213, type: "application/pdf" },
+       { filename: "packing-list.xlsx", bytes: 11204, type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }]
+    : [{ filename: "request-voice.mp3", bytes: 182400, type: "audio/mpeg" }];
   const mails: MailRow[] = [{ id, sender: s.customer, subject: s.subject, received_at: s.received_at, route: "rfq",
-    body: `Hi, please quote ${s.fields.weight_kg} kg from ${s.fields.origin} to ${s.fields.destination}. ${s.fields.prefer === "fastest" ? "Fastest" : "Cheapest"} option please.` }];
+    files: reqFiles,
+    body: reqFiles[0].type === "audio/mpeg"
+      ? `(voice message, transcribed) Hi, I need a quote for ${s.fields.weight_kg} kg from ${s.fields.origin} to ${s.fields.destination}, ${s.fields.prefer === "fastest" ? "the fastest" : "the cheapest"} you have.`
+      : `Hi, please find the request attached: ${s.fields.weight_kg} kg from ${s.fields.origin} to ${s.fields.destination}. ${s.fields.prefer === "fastest" ? "Fastest" : "Cheapest"} option please.` }];
   const ev = (i: number, dt: number, kind: string, data: Record<string, unknown>): EventRow => ({ id: i, ts: s.received_at + dt, kind, data });
   const events: EventRow[] = [ev(1, 0, "mail_in", { route: "rfq" }), ev(2, 4, "llm", { language: s.fields.language, cost_usd: s.llm_cost_usd })];
   if (s.options.length) events.push(ev(3, 9, "options", { count: s.options.length }));
   if (s.status === "waiting_bids") events.push(ev(4, 10, "waiting_bids", { wait_s: 90 }));
   if (s.quoted_at) events.push(ev(5, s.quoted_at - s.received_at, "quote_sent", { airline: s.chosen?.airline, total: s.chosen?.total }));
   if (s.status === "needs_human") events.push(ev(6, 12, "needs_human", { why: s.note }));
-  const reply_files = s.quoted_at ? [{ filename: `offer-GOOGLE-${id}.pdf`, bytes: 2253, type: "application/pdf" }] : [];
+  const reply_files: FileRef[] = s.quoted_at ? [{ filename: `offer-${s.fields.origin}-${s.fields.destination}-${id}.pdf`, bytes: 2253, type: "application/pdf" }] : [];
   return { ...s, events, mails, actions: [], reply_files };
 }

@@ -54,7 +54,11 @@ export type MailRow = { id: number; sender: string; subject: string; body: strin
 
 export type ActionRow = { id: number; kind: string; body: string; created_at: number; done_at: number | null; result: string | null };
 
-export type SessionDetail = Session & { events: EventRow[]; mails: MailRow[]; actions: ActionRow[]; reply_files: FileRef[] };
+// Invoice for this booking and reliability warnings for its carriers (Patrick's invoices / carrier_flags tables).
+export type DetailInvoice = { number: string; amount: number; currency: string; status: string; due_at: number; overdue_days: number; sent: boolean; paid_at: number | null };
+export type CarrierWatch = { carrier: string; level: string; reasons: string[] };
+export type SessionDetail = Session & { events: EventRow[]; mails: MailRow[]; actions: ActionRow[]; reply_files: FileRef[];
+  invoice?: DetailInvoice | null; watch?: CarrierWatch[] };
 
 export type Stats = {
   total: number;

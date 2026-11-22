@@ -1,16 +1,17 @@
 // One place the screens get data from: the real DB when it has sessions, demo data otherwise.
 import { getDb } from "./db";
+import { getCarrierFlags, getInvoice } from "./invoices";
 import { fakeDetail, fakeSessions } from "./fake";
 import { ActionRow, EventRow, FileRef, MailRow, QUOTE_SENT, Session, SessionDetail, Stats } from "./types";
 
 export type Source = "live" | "demo";
 
-function parse<T>(v: unknown, fallback: T): T {
+export function parse<T>(v: unknown, fallback: T): T {
   if (typeof v !== "string" || !v) return fallback;
   try { return JSON.parse(v) as T; } catch { return fallback; }
 }
 
-function rowToSession(r: Record<string, unknown>): Session {
+export function rowToSession(r: Record<string, unknown>): Session {
   return {
     thread_id: r.thread_id as number, customer: (r.customer as string) ?? "", subject: (r.subject as string) ?? "",
     status: (r.status as Session["status"]) ?? "new",
@@ -58,7 +59,17 @@ export function getDetail(id: number): { source: Source; session: SessionDetail 
     filename: String(a.filename ?? "attachment"), bytes: typeof a.bytes === "number" ? a.bytes : null, type: null }));
   let actions: ActionRow[] = [];
   try { actions = db.prepare("SELECT id, kind, body, created_at, done_at, result FROM actions WHERE thread_id=? ORDER BY id").all(id) as ActionRow[]; } catch { /* table not created yet */ }
-  return { source: "live", session: { ...rowToSession(r), events, mails, actions, reply_files } };
+  const base = rowToSession(r);
+  const inv = getInvoice(id);
+  const invoice = inv ? { number: inv.number, amount: inv.amount, currency: inv.currency, status: inv.status, due_at: inv.due_at,
+    overdue_days: inv.overdue_days, sent: inv.sent, paid_at: inv.paid_at } : null;
+  // Warn only about the carriers this shipment depends on: the airline we quoted and the trucker we picked.
+  // (Every carrier we merely asked would bury the one warning that matters.)
+  const used = new Set<string>([base.chosen?.airline ?? ""]);
+  for (const e of events) if (e.kind === "bid_picked" && e.data.carrier) used.add(String(e.data.carrier));
+  const watch = getCarrierFlags().filter((f) => (f.level === "red" || f.level === "amber") && used.has(f.carrier))
+    .map((f) => ({ carrier: f.carrier, level: f.level, reasons: f.reasons }));
+  return { source: "live", session: { ...base, events, mails, actions, reply_files, invoice, watch } };
 }
 
 export function computeStats(sessions: Session[]): Stats {
