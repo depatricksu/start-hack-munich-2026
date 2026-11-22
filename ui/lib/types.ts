@@ -24,6 +24,8 @@ export type Fields = {
   prefer?: "cheapest" | "fastest";
   language?: string | null;
   missing?: string[];
+  // several shipments in one request: each has its own lane, weight and volume; the request itself has none
+  shipments?: { origin?: string | null; destination?: string | null; weight_kg?: number | null; volume_cbm?: number | null }[] | null;
 };
 
 export type Session = {
