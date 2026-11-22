@@ -178,7 +178,7 @@ def price_and_quote(tid, mail, fields, asked=False):
         db.update_session(tid, status="waiting_bids")
         if getattr(portal, "LAST_DOWN", False):              # rate API 503: its airlines' prices are only on the portal page
             try:
-                portal_page.hold(tid, mail["id"], options)   # wait for a person's rate instead of quoting blind
+                portal_page.hold(tid, mail["id"], options)   # waits only for an automated portal page source, never for a person
             except Exception as e:                           # the hold is an extra: never lose the quote over it
                 db.event("error", tid, mail["id"], error="portal_page.hold: %s" % e)
         return db.event("waiting_bids", tid, mail["id"], pending=pending, wait_s=config.BID_WAIT_S)

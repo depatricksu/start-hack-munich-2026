@@ -1,5 +1,6 @@
-"""5U, 22 Nov 01:15 to 02:08: the rate API answered 503 and only the portal's web page had the portal airlines'
-prices. The clerk now holds the quote and takes a rate a person read on that page (sourcing/portal_page.py)."""
+"""5U, 22 Nov: when the rate API answers 503, only the portal's web page has the portal airlines' prices. 5U's rule
+(04:03): no human in the loop, also not on that page. The clerk waits for a rate only when an AUTOMATED source is
+configured (sourcing/portal_page.py); otherwise it quotes at the normal time with what it has."""
 import json, os, tempfile, time, unittest
 
 os.environ["DB_PATH"] = os.path.join(tempfile.mkdtemp(), "test.db")
@@ -20,12 +21,14 @@ def session(tid, fields, options, received=None):
 
 class PortalDown(unittest.TestCase):
     def setUp(self):
+        self.source, config.PORTAL_PAGE_SOURCE = config.PORTAL_PAGE_SOURCE, "agent"      # an automated harness is running
         self.lanes = dict(portal.LANES)
         portal.LANES.clear()
         portal.LANES[("HAM", "YYZ")] = [{"code": "BX", "name": "Borealis Freight Airways"}, {"code": "JP", "name": "Juniper Cargo Lines"}]
         portal.LANES[("HAM", "MEX")] = [{"code": "RV", "name": "Riverbend Airlines Cargo"}]
 
     def tearDown(self):
+        config.PORTAL_PAGE_SOURCE = self.source
         portal.LANES.clear()
         portal.LANES.update(self.lanes)
 
@@ -35,16 +38,16 @@ class PortalDown(unittest.TestCase):
         self.assertTrue(portal_page.hold(920001, mail["id"], []))
         s = db.session(920001)
         self.assertAlmostEqual(s["deadline"], s["received_at"] + config.PORTAL_DOWN_HOLD_S, places=1)
-        self.assertIn("RATE PORTAL DOWN", s["note"])
-        for part in ("BX (Borealis Freight Airways", "JP (Juniper Cargo Lines", "HAM to YYZ", "81 kg", "0.67 cbm", "start-hack.5u.ai/portal/ui"):
+        self.assertIn("RATE API DOWN, waiting for the portal page agent", s["note"])
+        self.assertNotIn("Read the rate", s["note"])                # nothing asks a person to do anything
+        for part in ("BX (Borealis Freight Airways", "JP (Juniper Cargo Lines", "HAM to YYZ", "81 kg", "0.67 cbm"):
             self.assertIn(part, s["note"])
 
-    def test_a_rate_read_by_a_person_becomes_an_option_and_releases_the_quote(self):
-        """Round 100, live: Borealis 645.60 EUR, 1 day, read on the page at 02:04; quoted, accepted, booked with the rate_id."""
+    def test_a_rate_from_the_automated_source_becomes_an_option_and_releases_the_quote(self):
         f = {"origin": "HAM", "destination": "YYZ", "weight_kg_total": 81.0, "volume_cbm_total": 0.67, "prefer": "fastest"}
         mail = session(920002, f, [])
         portal_page.hold(920002, mail["id"], [])
-        opt = portal_page.add(920002, "bx", "645.6", 1, "R-CN-Uk_5BeqIhb2d4")
+        opt = portal_page.add(920002, "bx", "645.6", 1, "R-CN-Uk_5BeqIhb2d4", by="test-harness")
         self.assertEqual((opt["airline"], opt["airline_code"], opt["total_eur"], opt["transit_days"], opt["source"], opt["rate_id"]),
                          ("Borealis Freight Airways", "BX", "645.60", 1, "portal page", "R-CN-Uk_5BeqIhb2d4"))
         s = db.session(920002)
@@ -66,6 +69,23 @@ class PortalDown(unittest.TestCase):
         mail = session(920004, f, [])
         self.assertFalse(portal_page.hold(920004, mail["id"], [{"airline": "Yellowtail Air Freight", "transit_days": 3, "total_eur": "1500.00"}]))
         self.assertTrue(portal_page.hold(920004, mail["id"], [{"airline": "Yellowtail Air Freight", "transit_days": 5, "total_eur": "1500.00"}]))
+
+    def test_without_an_automated_source_nothing_waits_for_a_person(self):
+        """5U, 04:03: 'no human in the loop ... that includes the portal page'. No source configured: no hold."""
+        config.PORTAL_PAGE_SOURCE = ""
+        f = {"origin": "HAM", "destination": "YYZ", "weight_kg_total": 81.0, "volume_cbm_total": 0.67, "prefer": "fastest"}
+        mail = session(920007, f, [])
+        before = db.session(920007)
+        self.assertFalse(portal_page.hold(920007, mail["id"], []))
+        after = db.session(920007)
+        self.assertEqual((after["deadline"], after["note"]), (before["deadline"], before["note"]))   # normal time, no note for a person
+
+    def test_the_source_is_logged_with_the_rate(self):
+        f = {"origin": "HAM", "destination": "YYZ", "weight_kg_total": 81.0, "volume_cbm_total": 0.67, "prefer": "fastest"}
+        session(920008, f, [])
+        portal_page.add(920008, "BX", "645.60", 1, by="browser-agent")
+        e = db.con().execute("SELECT data FROM events WHERE thread_id=920008 AND kind='portal_page_price'").fetchone()
+        self.assertEqual(json.loads(e["data"])["by"], "browser-agent")
 
     def test_too_late_is_refused(self):
         f = {"origin": "HAM", "destination": "YYZ", "weight_kg_total": 81.0, "volume_cbm_total": 0.67}
