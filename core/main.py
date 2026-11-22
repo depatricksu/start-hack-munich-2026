@@ -9,7 +9,7 @@ To add a feature, write a handler in your own folder and register it in HANDLERS
 """
 import csv, json, os, re, sys, time, traceback, urllib.error
 from decimal import Decimal
-from . import attachments, config, db, mailbox, safety, offer_file
+from . import attachments, config, db, mailbox, safety, offer_file, recall
 from router.route import route
 from llm import extract as llm
 from pricing import price as sheets, insurance, customs
@@ -45,6 +45,8 @@ def shipment(f):
     (live bug 21 Nov: round 9 priced 730 of 1952 kg -> rejected 'too_low'). Pieces with only dimensions (kg_each
     null) add volume, not weight, so the normal single-shipment case is unchanged."""
     pieces = f.get("pieces") or []
+    pieces = [p for p in pieces if isinstance(p, dict)] if isinstance(pieces, list) else []   # the model once sent [6] for
+    # "six pieces" (22 Nov 02:20, the answer to our question): 'int' object has no attribute 'get', the request went to a person
     pieces_kg = sum((p.get("count") or 1) * (p.get("kg_each") or 0) for p in pieces)
     pieces_cbm = sum((p.get("count") or 1) * (p.get("l_cm") or 0) * (p.get("w_cm") or 0) * (p.get("h_cm") or 0)
                      for p in pieces) / 1e6
@@ -90,6 +92,10 @@ def handle_rfq(mail):
         db.event("dg", tid, mail["id"], dg=fields["dg"], mode=dg.mode())
     fields["origin"] = _airport(fields.get("origin"))        # the string "NULL" must not block zone->airport
     fields["destination"] = _airport(fields.get("destination"))
+    try:
+        recall.merge(mail, fields)                          # "the same shipment as in my earlier request ...": from our records
+    except Exception as e:                                   # an extra: never lose the request over it
+        db.event("error", tid, mail["id"], error="recall.merge: %s" % e)
     postcode = str(fields.get("pickup_postcode") or "")
     if not fields.get("origin") and postcode[:2] in ZONE_AIRPORT:
         fields["origin"] = ZONE_AIRPORT[postcode[:2]]
