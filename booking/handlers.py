@@ -172,6 +172,24 @@ PICKS_TIME = re.compile(r"\b(?:mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)(?:da
                         r"\b\d{1,2}\.?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)", re.I)
 
 
+# 5U, 22 Nov 02:52 (round 108): "that works for me, and I'm happy to accept your offer. Could you go ahead and book the
+# shipment now, please?" was 'unclear': a question mark and "could you". A polite request to book IS the yes. It only
+# counts when the sentence carries no change of the deal ("could you book it for Friday instead?" stays a question).
+BOOK_REQUEST = re.compile(r"\b(?:could|can|would|will) you (?:please |kindly |now )?(?:go ahead (?:and|with) |proceed (?:and|with|to) |now )?"
+                          r"(?:please )?(?:book|proceed|confirm the (?:booking|order|shipment)|place the (?:booking|order)|arrange the booking|"
+                          r"go ahead with the booking|the booking)\b|"
+                          r"\bk[öo]nn(?:t)?en sie (?:bitte |jetzt )?(?:die sendung |das |es |den auftrag )?(?:jetzt |bitte )?(?:buchen|best[äa]tigen)\b", re.I)
+CHANGES_DEAL = re.compile(r"\b(instead|cheaper|faster|change\w*|different|another|other|earlier|later|sooner|if|unless|but|only|except|"
+                          r"for (?:less|under|a lower)|at (?:a lower|a better)|discount|match|anders|stattdessen|g[üu]nstiger|schneller|aber|falls|wenn)\b|"
+                          r"\b\d[\d.,]*\s*(?:eur|€|kg|cbm|%)", re.I)
+_SENTENCES = re.compile(r"(?<=[.!?])\s+|\n+")
+
+
+def without_book_requests(text):
+    """The text without the sentences that only ask us to book ('Could you go ahead and book the shipment now, please?')."""
+    return " ".join(x for x in _SENTENCES.split(text or "") if not (BOOK_REQUEST.search(x) and not CHANGES_DEAL.search(x)))
+
+
 def books_after_call_offer(verdict, text):
     """After we offered a call about the price: True when the customer simply takes the quote and wants it booked.
     A reply that names a day, a time or the call itself stays with a person."""
@@ -195,6 +213,10 @@ def classify(body, subject=""):
         return "validity" if VALIDITY.search(text) else "unclear"
     facts = EXTRA_SERVICE.sub(" ", text)       # "book it, and insure it for EUR 25,000": the amount is a service wish
     if ACCEPT.search(text) and not QUESTION.search(text) and not CONDITION.search(calm) and not NEW_FACTS.search(facts):
+        return "accept"
+    asked_to_book = without_book_requests(text)             # "..., I accept your offer. Could you go ahead and book it now, please?"
+    if asked_to_book != " ".join(x for x in _SENTENCES.split(text) if x) and ACCEPT.search(text) and not QUESTION.search(asked_to_book) \
+            and not CONDITION.search(calm) and not NEW_FACTS.search(facts):
         return "accept"
     if VALIDITY.search(text) and not ACCEPT.search(text):
         return "validity"
