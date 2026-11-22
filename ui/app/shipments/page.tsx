@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Check, Copy } from "lucide-react";
 import type { Line, Message, ShipmentDetail, ShipmentRow, ShipmentsData, Step } from "@/lib/shipments";
+import { carrierHref, ShipmentCarrierUpdates } from "@/components/carrier-updates";
 
 const short = (m: string) => m.split("@")[0];
 const at = (ts: number | null) => (ts ? new Date(ts * 1000).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "");
@@ -156,8 +157,8 @@ function Detail({ d }: { d: ShipmentDetail }) {
             <div className="mt-1 flex flex-wrap gap-x-4 text-xs text-zinc-500">
               <span>Booking <span className="num text-zinc-300">{d.booking_ref ?? "—"}</span></span>
               <span>Our ref <span className="num text-zinc-300">{d.ref}</span></span>
-              <span>Airline <span className="text-zinc-300">{d.airline ?? "—"}</span></span>
-              {d.trucker && <span>Trucker <span className="text-zinc-300">{d.trucker}</span></span>}
+              <span>Airline {d.airline ? <Link href={carrierHref(d.airline)} className="text-zinc-300 hover:text-white hover:underline">{d.airline}</Link> : <span className="text-zinc-300">—</span>}</span>
+              {d.trucker && <span>Trucker <Link href={carrierHref(d.trucker)} className="text-zinc-300 hover:text-white hover:underline">{d.trucker}</Link></span>}
               {d.price && <span>Price <span className="num text-zinc-300">{d.price}</span></span>}
             </div>
           </div>
@@ -202,6 +203,8 @@ function Detail({ d }: { d: ShipmentDetail }) {
           </div>
         </div>
       </section>
+
+      <ShipmentCarrierUpdates thread={d.thread} />
 
       <section className="rounded-2xl glass p-5">
         <div className="flex items-baseline gap-2">

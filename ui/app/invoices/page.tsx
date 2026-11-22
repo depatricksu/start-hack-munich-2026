@@ -86,7 +86,6 @@ export default function InvoicesPage() {
       : filter === "reported" ? r.status === "paid_reported"
       : r.status === "paid");
   const maxCust = Math.max(1, ...d.byCustomer.map((c) => c.eur));
-  const watch = data.carriers.filter((c) => c.level === "red" || c.level === "amber");
 
   return (
     <div className="h-full overflow-y-auto p-2">
@@ -172,15 +171,6 @@ export default function InvoicesPage() {
               </div>
             </section>
 
-            {/* Carriers to watch: they cost us money when they fail */}
-            <section className="rounded-2xl glass p-4">
-              <h2 className="text-sm font-semibold text-white">Carriers to watch</h2>
-              <p className="text-xs text-zinc-500">From their record with us: unanswered price requests, late or failed bookings.</p>
-              <div className="mt-3 space-y-2">
-                {watch.length === 0 && <p className="text-sm text-zinc-500">No carrier flagged.</p>}
-                {watch.slice(0, 6).map((c) => <FlagRow key={c.carrier} c={c} />)}
-              </div>
-            </section>
           </div>
         </div>
       </div>
@@ -227,26 +217,5 @@ function InvoiceRow({ r, now, open, onToggle, onPaid, busy }: { r: Invoice; now:
         </tr>
       )}
     </>
-  );
-}
-
-function FlagRow({ c }: { c: CarrierFlag }) {
-  const red = c.level === "red";
-  const ids = [...new Set(Object.values(c.examples).flat())].slice(0, 5);
-  return (
-    <div className="rounded-xl bg-white/[0.02] px-3 py-2 ring-1 ring-inset ring-white/6">
-      <div className="flex items-center gap-2">
-        <span className={`h-1.5 w-1.5 rounded-full ${red ? "bg-red-400" : "bg-amber-400"}`} />
-        <span className="text-[13px] font-medium text-white">{c.carrier}</span>
-        <span className="text-[11px] text-zinc-500">{c.role === "ratedesk" ? "rate desk" : c.role}</span>
-        <span className={`num ml-auto text-xs ${red ? "text-red-300" : "text-amber-300"}`}>{c.issues} of {c.jobs}</span>
-      </div>
-      <div className="mt-0.5 pl-3.5 text-xs text-zinc-400">{c.reasons.join(" · ")}</div>
-      {ids.length > 0 && (
-        <div className="mt-1 flex flex-wrap gap-1 pl-3.5">
-          {ids.map((id) => <Link key={id} href={`/requests?id=${id}`} className="num text-[11px] text-zinc-500 hover:text-white">#{id}</Link>)}
-        </div>
-      )}
-    </div>
   );
 }
