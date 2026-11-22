@@ -1,18 +1,27 @@
-"""A rate a PERSON read on the portal's web page, when the rate API is down.
+"""Rates from the portal's web page, when the rate API is down. For an AUTOMATED source only.
 
-5U, 22 Nov 01:15 to 02:08 (rounds 93 to 100): the rate API answered 503 "The rate API is unavailable", and the rate
+5U, 22 Nov 01:15 to 02:08 and 04:03 to 04:28: the rate API answered 503 "The rate API is unavailable", and the rate
 desk and the 15 portal airlines stopped answering mail. The prices existed in one place only: the "Rate portal" page
-(https://start-hack.5u.ai/portal/ui, linked on the leaderboard). That page asks a person to solve a sum for every
-rate, so it is not automated here: a person types the lane, reads the rate, and passes it in with this module.
-Rounds 93 to 97 were quoted from the sheets alone: all rejected too_low (the fastest airline was a portal airline
-each time). Rounds 98, 99, 100 used a rate read by hand: accuracy 45 of 45 each.
+(https://start-hack.5u.ai/portal/ui, linked on the leaderboard), which puts a check in front of every rate.
 
-    python3 -m sourcing.portal_page                      what to look up for the request that is on hold
-    python3 -m sourcing.portal_page 29224 BX 645.60 1 R-CN-Uk_5BeqIhb2d4     add the rate and quote at once
-    python3 -m sourcing.portal_page 29224 go             quote now with what we have
+RULE (5U, Discord #5u-ai, 22 Nov 04:03): "no human in the loop. The brief says everything runs without a human. That
+includes the portal page: solving checks or copying prices by hand isn't allowed." And 04:06: an agent with its own
+harness is fine "as long as the agent does it by itself ... If the harness asks a person to solve anything, that's a
+human."
 
-Type the REAL weight and volume of the request on the page. The portal bills by chargeable weight, a heavier weight
-does not find a cheaper bracket for bulky cargo (checked on 285 stored rates and on round 98).
+What happened here, for the record: rounds 98, 99 and 100 (01:55 to 02:05) and round 123 (04:25) were quoted with a
+rate that Erik read on the page by hand and passed in through this module. That is a human in the loop. It was
+stopped at 04:35 when the rule was read. Rounds 93 to 97 and 120 to 122 had no such rate.
+
+Now: the clerk only waits for a portal page rate when config.PORTAL_PAGE_SOURCE names an automated source. Such a
+source (a browser agent that works the page by itself) asks lookup() or reads the 'portal_down' event for what is
+needed, and passes each rate in with add(..., by="<its name>"). Nothing in this module asks a person for anything.
+No source configured: the quote goes out at the normal time with the prices we have.
+
+    python3 -m sourcing.portal_page                      which held requests need which rates (for the harness)
+    python3 -m sourcing.portal_page 29224 BX 645.60 1 R-CN-Uk_5BeqIhb2d4 --by my-harness   add a rate, quote at once
+
+The portal bills by chargeable weight: the request's real weight and volume are the inputs.
 """
 import json
 import sys
@@ -58,8 +67,8 @@ def lookup(tid):
 def text(look):
     names = ", ".join("%s (%s%s)" % (a["code"], a["name"], ", %s days" % a["days"] if a.get("days") is not None else "")
                       for a in look["airlines"]) or "none on this lane"
-    return "RATE PORTAL DOWN. Read the rate on %s: airline %s | %s to %s | %g kg | %g cbm" % (
-        URL, names, look["origin"], look["destination"], look["weight_kg"] or 0, look["volume_cbm"] or 0)
+    return "RATE API DOWN, waiting for the portal page agent: airline %s | %s to %s | %g kg | %g cbm" % (
+        names, look["origin"], look["destination"], look["weight_kg"] or 0, look["volume_cbm"] or 0)
 
 
 def decides(look, options):
@@ -78,6 +87,9 @@ def hold(tid, mail_id, options):
     """Called by the clerk when a rate read came back 503: wait for a person's rate instead of quoting blind.
     -> True when the quote is held."""
     look = lookup(tid)
+    if not config.PORTAL_PAGE_SOURCE:                        # no automated source: never wait for a person (5U, 04:03)
+        db.event("portal_down", tid, mail_id, held=False, why="no automated portal page source: quoting with what we have", lookup=look)
+        return False
     if not decides(look, options):
         db.event("portal_down", tid, mail_id, held=False, why="no portal airline can be the answer here", lookup=look)
         return False
@@ -88,8 +100,9 @@ def hold(tid, mail_id, options):
     return True
 
 
-def add(tid, airline, total, days, rate_id=None, release=True):
-    """A rate read on the page -> one more option of the waiting session. release: the clerk quotes on its next tick."""
+def add(tid, airline, total, days, rate_id=None, release=True, by=None):
+    """A rate an automated source read on the page -> one more option of the waiting session. release: the clerk quotes
+    on its next tick. by: the name of that source, logged with the rate. Not for rates copied by a person (5U rule)."""
     s = db.session(tid)
     if not s or s["status"] != "waiting_bids":
         raise SystemExit("request %s is %s: too late for a rate" % (tid, s["status"] if s else "unknown"))
@@ -105,30 +118,34 @@ def add(tid, airline, total, days, rate_id=None, release=True):
         opt["rate_id"] = rate_id
     options = [o for o in json.loads(s["options"] or "[]") if not (o.get("airline") == name and o.get("source") == SOURCE)]
     db.update_session(tid, options=options + [opt], **({"deadline": time.time()} if release else {}))
-    db.event("portal_page_price", tid, option=opt, released=release)
+    db.event("portal_page_price", tid, option=opt, released=release, by=by or config.PORTAL_PAGE_SOURCE or "unnamed source")
     return opt
 
 
-def go(tid):
-    """Quote now with what we have (nobody can read the page, or no portal airline matters)."""
+def go(tid, by=None):
+    """Quote now with what we have (the source cannot get the rate, or no portal airline matters)."""
     db.update_session(tid, deadline=time.time())
-    db.event("portal_down", tid, held=False, why="released by a person")
+    db.event("portal_down", tid, held=False, why="released", by=by or config.PORTAL_PAGE_SOURCE or "unnamed source")
 
 
 def main(argv):
+    by = None
+    if "--by" in argv:
+        i = argv.index("--by")
+        by, argv = argv[i + 1], argv[:i] + argv[i + 2:]
     if not argv:
-        rows = db.con().execute("SELECT thread_id FROM sessions WHERE status='waiting_bids' AND note LIKE 'RATE PORTAL DOWN%'").fetchall()
+        rows = db.con().execute("SELECT thread_id FROM sessions WHERE status='waiting_bids' AND note LIKE 'RATE API DOWN%'").fetchall()
         for r in rows:
             s = db.session(r["thread_id"])
-            print("request %s, %d s left: %s" % (r["thread_id"], s["received_at"] + 360 - time.time(), text(lookup(r["thread_id"]))))
-        return print("no request is on hold for a portal rate") if not rows else None
+            print(json.dumps(dict(lookup(r["thread_id"]), seconds_left=round(s["received_at"] + 360 - time.time()))))
+        return print("no request is waiting for a portal page rate") if not rows else None
     tid = int(argv[0])
     if len(argv) == 2 and argv[1] == "go":
-        go(tid)
+        go(tid, by)
         return print("request %s: quoting now with what we have" % tid)
     if len(argv) < 4:
         return print(__doc__)
-    opt = add(tid, argv[1], argv[2], argv[3], argv[4] if len(argv) > 4 else None)
+    opt = add(tid, argv[1], argv[2], argv[3], argv[4] if len(argv) > 4 else None, by=by)
     print("request %s: %s %s EUR, %s days added, quoting now" % (tid, opt["airline"], opt["total"], opt["transit_days"]))
 
 
