@@ -161,6 +161,23 @@ LATER = re.compile(r"\b(get back to you|come back to you|revert|will (?:review|d
                    r"melde mich|melden uns|gebe ihnen (?:morgen |noch )?bescheid|r[üu]ckmeldung folgt)\b", re.I)
 
 
+# 5U, 22 Nov 02:46 (round 107): "Another forwarder has quoted 7 percent less. Can you match their rate?" We kept our
+# price and offered a call. The customer: "That works for us, and we accept your offer. Please book the shipment now."
+# That was parked as an answer to the call offer and nothing was booked.
+BOOKS_NOW = re.compile(r"\b(?:book\w*|buch\w*|r[ée]serv\w*|prenot\w*|go ahead|proceed|"
+                       r"accept(?:s|ed|ing)? (?:your|the|this|that) (?:offer|quote|quotation|price|rate)|nehmen? (?:das|ihr) angebot an|"
+                       r"place the (?:order|shipment)|confirm the (?:order|booking|shipment))\b", re.I)
+PICKS_TIME = re.compile(r"\b(?:mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)(?:day|sday|nesday|rsday|urday)?\b|\b(?:montag|dienstag|mittwoch|donnerstag|freitag)\b|"
+                        r"\b\d{1,2}[:.h]\d{2}\b|\b\d{1,2}\s*(?:am|pm|uhr)\b|\b(?:call|slot|meeting|appointment|termin|anruf|appel|chiamata|llamada)\b|"
+                        r"\b\d{1,2}\.?\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)", re.I)
+
+
+def books_after_call_offer(verdict, text):
+    """After we offered a call about the price: True when the customer simply takes the quote and wants it booked.
+    A reply that names a day, a time or the call itself stays with a person."""
+    return verdict == "accept" and bool(BOOKS_NOW.search(text or "")) and not PICKS_TIME.search(text or "")
+
+
 def classify(body, subject=""):
     """accept / decline / better_price / faster / sending_docs / unclear. Only the customer's new text counts."""
     # "so we won\u2019t go ahead" (typographic apostrophe) was read as "go ahead" = yes and BOOKED (live, round 72)
@@ -719,7 +736,11 @@ def handle_follow_up(mail):
         db.event("extra_service_requested", tid, mail["id"], wish=wish[:120])
         db.update_session(tid, note="CUSTOMER ALSO ASKED: %s (book it, then arrange this by hand)" % wish[:160])
     if s["status"] == "meeting_proposed" and verdict != "decline":   # "Tue 10:00, please confirm" is not a booking
-        return _needs_human(tid, mail["id"], "customer answered our call offer (picked a time?): forwarder to follow up")
+        if not books_after_call_offer(verdict, own_text(mail["body"], mail.get("subject"))):
+            return _needs_human(tid, mail["id"], "customer answered our call offer (picked a time?): forwarder to follow up")
+        db.update_session(tid, status="quoted", note="")    # no call needed: they take the quote as it is
+        db.event("accept_after_call_offer", tid, mail["id"])
+        s = dict(s, status="quoted")
     if verdict == "decline":
         return db.update_session(tid, status="lost", note="customer declined")       # no mail, just closed
     if verdict == "better_price":
