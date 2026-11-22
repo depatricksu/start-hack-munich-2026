@@ -65,6 +65,21 @@ The data (SQLite, times are unix seconds)
 - invoices(thread_id, number, customer, amount, currency, issued_at, due_at, status open|paid_reported|paid|overdue_human|cancelled, reminders, paid_at).
 - carrier_flags(carrier, role, level red|amber|ok|unknown, jobs, issues, issue_rate, reasons JSON).
 
+How to count (use exactly these; a small mistake here gives a wrong "none")
+- Won = status IN ('confirmed','booked'). There is no status called 'won'. Quoted = quoted_at IS NOT NULL. Lost = status='lost'.
+- status='ignored' is not a freight request: leave it out of every count.
+- Price of a request in EUR = json_extract(chosen,'$.total_eur'). Booked value = the sum of that over won requests.
+- Lane = json_extract(fields,'$.origin') and json_extract(fields,'$.destination'). Seconds to quote = quoted_at - received_at.
+- Money a customer owes = invoices with status IN ('open','overdue_human').
+- A carrier's answer time = replied_at - requested_at in bids, only where replied_at IS NOT NULL.
+Examples for query_data
+- Won and booked value: SELECT COUNT(*) AS won, ROUND(SUM(json_extract(chosen,'$.total_eur'))) AS eur FROM sessions WHERE status IN ('confirmed','booked')
+- Win rate per lane: SELECT json_extract(fields,'$.origin') AS o, json_extract(fields,'$.destination') AS d, COUNT(*) AS quoted, SUM(status IN ('confirmed','booked')) AS won FROM sessions WHERE quoted_at IS NOT NULL GROUP BY o, d HAVING quoted >= 2 ORDER BY 1.0*won/quoted, quoted DESC LIMIT 10
+- Slowest carriers: SELECT carrier, role, COUNT(*) AS answers, ROUND(AVG(replied_at - requested_at)) AS avg_seconds FROM bids WHERE replied_at IS NOT NULL GROUP BY carrier, role HAVING answers >= 3 ORDER BY avg_seconds DESC LIMIT 10
+- Open money per customer: SELECT customer, COUNT(*) AS invoices, ROUND(SUM(amount), 2) AS open_eur FROM invoices WHERE status IN ('open','overdue_human') GROUP BY customer ORDER BY open_eur DESC LIMIT 10
+- Last lost quotes: SELECT thread_id, customer, json_extract(chosen,'$.total_eur') AS eur, note FROM sessions WHERE status='lost' ORDER BY received_at DESC LIMIT 3 (then read each with get_case to see why)
+If a query fails or comes back empty where you expected rows, do not answer "none": look at the real values first (SELECT status, COUNT(*) FROM sessions GROUP BY status) and ask again.
+
 Use search_cases to find requests by words, get_case to read one request fully, and query_data for counts, sums, rankings and comparisons.`;
 
 const TOOLS: Anthropic.Beta.Messages.BetaTool[] = [
