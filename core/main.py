@@ -9,7 +9,7 @@ To add a feature, write a handler in your own folder and register it in HANDLERS
 """
 import csv, json, os, re, sys, time, traceback, urllib.error
 from decimal import Decimal
-from . import attachments, config, db, mailbox, safety, offer_file, recall
+from . import attachments, config, db, imports, mailbox, safety, offer_file, recall
 from router.route import route, lookalike, ADDRESS_SWITCH
 from llm import extract as llm
 from pricing import price as sheets, insurance, customs
@@ -151,6 +151,9 @@ def price_and_quote(tid, mail, fields, asked=False):
     ok, note = rfq_gate(fields, mail)                       # shared/rfq.py (Patrick): stop or warn, with reason codes
     db.event("gate", tid, mail["id"], ok=ok, note=note)
     if not ok:
+        into = imports.lane(fields, mail)                    # a flight INTO Germany: nobody offers it, say so (5U 08:01)
+        if into:
+            return imports.decline(tid, mail, fields, *into)
         missing = clarify.only_missing(fields, mail)
         if missing and not asked and config.CLARIFY:         # only data is missing: ask the customer once (Erik)
             return clarify.ask(tid, mail, fields, missing)
