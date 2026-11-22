@@ -70,13 +70,14 @@ How to count (use exactly these; a small mistake here gives a wrong "none")
 - status='ignored' is not a freight request: leave it out of every count.
 - Price of a request in EUR = json_extract(chosen,'$.total_eur'). Booked value = the sum of that over won requests.
 - Lane = json_extract(fields,'$.origin') and json_extract(fields,'$.destination'). Seconds to quote = quoted_at - received_at.
-- Money a customer owes = invoices with status IN ('open','overdue_human').
+- Money a customer owes = invoices with status IN ('open','overdue_human'). Invoices carry their own currency: never add up
+  amounts in different currencies, always GROUP BY currency and name the currency in the answer.
 - A carrier's answer time = replied_at - requested_at in bids, only where replied_at IS NOT NULL.
 Examples for query_data
 - Won and booked value: SELECT COUNT(*) AS won, ROUND(SUM(json_extract(chosen,'$.total_eur'))) AS eur FROM sessions WHERE status IN ('confirmed','booked')
 - Win rate per lane: SELECT json_extract(fields,'$.origin') AS o, json_extract(fields,'$.destination') AS d, COUNT(*) AS quoted, SUM(status IN ('confirmed','booked')) AS won FROM sessions WHERE quoted_at IS NOT NULL GROUP BY o, d HAVING quoted >= 2 ORDER BY 1.0*won/quoted, quoted DESC LIMIT 10
 - Slowest carriers: SELECT carrier, role, COUNT(*) AS answers, ROUND(AVG(replied_at - requested_at)) AS avg_seconds FROM bids WHERE replied_at IS NOT NULL GROUP BY carrier, role HAVING answers >= 3 ORDER BY avg_seconds DESC LIMIT 10
-- Open money per customer: SELECT customer, COUNT(*) AS invoices, ROUND(SUM(amount), 2) AS open_eur FROM invoices WHERE status IN ('open','overdue_human') GROUP BY customer ORDER BY open_eur DESC LIMIT 10
+- Open money per customer: SELECT customer, currency, COUNT(*) AS invoices, ROUND(SUM(amount), 2) AS open_amount FROM invoices WHERE status IN ('open','overdue_human') GROUP BY customer, currency ORDER BY open_amount DESC LIMIT 10
 - Last lost quotes: SELECT thread_id, customer, json_extract(chosen,'$.total_eur') AS eur, note FROM sessions WHERE status='lost' ORDER BY received_at DESC LIMIT 3 (then read each with get_case to see why)
 If a query fails or comes back empty where you expected rows, do not answer "none": look at the real values first (SELECT status, COUNT(*) FROM sessions GROUP BY status) and ask again.
 
@@ -153,14 +154,26 @@ function toolCase(id: number) {
 function toolQuery(sql: string) {
   const q = String(sql).trim().replace(/;\s*$/, "");
   if (!/^(select|with)\b/i.test(q) || q.includes(";")) return { error: "Only one SELECT statement is allowed." };
+  // A recursive query can run forever. Nothing the assistant is asked needs one, and the query runs on the UI
+  // server's only thread, so it is refused (it could also come from text inside a mail).
+  if (/\brecursive\b/i.test(q)) return { error: "Recursive queries are not allowed. Use a plain SELECT." };
   const db = getDb();
   if (!db) return { error: "No data file." };
   try {
     // The connection is opened read-only (lib/db.ts), so nothing can be changed even by a crafted statement.
-    const rows = db.prepare(q).all() as Record<string, unknown>[];
+    // Rows are read one at a time and reading stops at 200 rows or after 4 seconds: a query with huge output
+    // cannot fill the memory or hold the server.
+    const stmt = db.prepare(q);
+    const rows: Record<string, unknown>[] = [];
+    const started = Date.now();
+    let more = false;
+    for (const r of (typeof stmt.iterate === "function" ? stmt.iterate() : stmt.all()) as Iterable<Record<string, unknown>>) {
+      if (rows.length >= 200 || Date.now() - started > 4000) { more = true; break; }
+      rows.push(r);
+    }
     return {
-      row_count: rows.length, shown: Math.min(rows.length, 200),
-      rows: rows.slice(0, 200).map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, cut(v, CELL)]))),
+      row_count: rows.length, more_rows_not_shown: more, shown: rows.length,
+      rows: rows.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, cut(v, CELL)]))),
     };
   } catch (e) {
     return { error: `SQL failed: ${(e as Error).message}` };

@@ -7,8 +7,11 @@ import { InvoiceDocument } from "@/components/v2/invoice-document";
 export const dynamic = "force-dynamic";
 
 export default async function InvoicePage({ params }: { params: Promise<{ number: string }> }) {
-  const { number } = await params;
-  const d = getInvoiceDoc(decodeURIComponent(number));
+  const { number: raw } = await params;
+  // A hand-typed address like /v2/invoices/100%25 is not valid to decode: show "No such invoice", not an error page.
+  let number = raw;
+  try { number = decodeURIComponent(raw); } catch { /* keep it as typed */ }
+  const d = getInvoiceDoc(number);
   const back = (
     <Link href="/v2/invoices" className="inline-flex items-center gap-1.5 text-[13px] text-[var(--fg-2)] transition-colors duration-150 hover:text-[var(--fg)]">
       <ArrowLeft size={14} />All invoices
@@ -19,7 +22,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ number
       <div className="mx-auto max-w-[900px] px-4 py-8 sm:px-6">
         {back}
         <h1 className="mt-4 text-[22px] font-semibold tracking-[-0.03em] text-[var(--fg)]">No such invoice</h1>
-        <p className="mt-1 text-[14px] text-[var(--fg-2)]">There is no invoice with the number {decodeURIComponent(number)}.</p>
+        <p className="mt-1 text-[14px] text-[var(--fg-2)]">There is no invoice with the number {number}.</p>
       </div>
     );
   }
