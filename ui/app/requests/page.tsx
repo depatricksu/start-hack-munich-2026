@@ -355,6 +355,35 @@ function Facts({ d }: { d: SessionDetail }) {
 
       {d.chosen && <QuoteCard chosen={d.chosen} options={d.options} />}
 
+      {(d.invoice || (d.watch && d.watch.length > 0)) && (
+        <div className="grid gap-3">
+          {d.invoice && (
+            <a href="/invoices" className="flex items-center gap-3 rounded-2xl glass-2 px-5 py-3.5 transition hover:bg-white/5">
+              <span className="text-[11px] uppercase tracking-wide text-zinc-500">Invoice</span>
+              <span className="num text-sm text-white">{d.invoice.number}</span>
+              <span className="num text-sm text-zinc-300">{money(String(d.invoice.amount), d.invoice.currency)}</span>
+              <span className={`ml-auto text-xs ${d.invoice.status === "paid" ? "text-emerald-300"
+                : d.invoice.overdue_days > 0 || d.invoice.status === "overdue_human" ? "text-red-300"
+                : d.invoice.status === "paid_reported" ? "text-amber-300" : "text-sky-300"}`}>
+                {d.invoice.status === "paid" ? "Paid"
+                  : d.invoice.status === "cancelled" ? "Cancelled"
+                  : d.invoice.status === "paid_reported" ? "Customer says paid, check the bank"
+                  : d.invoice.overdue_days > 0 ? `${d.invoice.overdue_days} days overdue`
+                  : `Open · due ${new Date(d.invoice.due_at * 1000).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}`}
+                {!d.invoice.sent && d.invoice.status !== "paid" && <span className="ml-2 text-zinc-500">draft</span>}
+              </span>
+            </a>
+          )}
+          {d.watch?.map((w) => (
+            <div key={w.carrier} className={`flex items-center gap-3 rounded-2xl px-5 py-3 ring-1 ring-inset ${w.level === "red" ? "bg-red-400/[0.06] ring-red-400/25" : "bg-amber-400/[0.06] ring-amber-400/25"}`}>
+              <span className={`h-1.5 w-1.5 rounded-full ${w.level === "red" ? "bg-red-400" : "bg-amber-400"}`} />
+              <span className="text-sm text-white">Watch {w.carrier}</span>
+              <span className={`text-xs ${w.level === "red" ? "text-red-300" : "text-amber-300"}`}>{w.reasons.join(" · ")}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
       <section className="rounded-2xl glass-2 p-5">
         <h3 className="mb-2 text-sm font-semibold text-white">Price options <span className="num font-normal text-zinc-500">{d.options.length}</span></h3>
         <OptionsTable options={d.options} chosen={d.chosen} />

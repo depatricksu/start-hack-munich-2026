@@ -3,6 +3,7 @@
 import { getDb } from "./db";
 import { getSessions, parse, rowToSession } from "./data";
 import { fakeDetail } from "./fake";
+import { getCarrierFlags } from "./invoices";
 import { EXPIRY_S, EventRow, Session } from "./types";
 import type {
   CarrierRow, CustomerRow, DashData, FeedDot, FeedItem, Kpi, LaneRow, QueueItem, Shipment, ShipStep, Tone,
@@ -353,16 +354,24 @@ export function getDashboard(): DashData {
       "SELECT carrier, COALESCE(role, kind, '') AS role, requested_at, replied_at, status, total_eur FROM bids WHERE carrier IS NOT NULL");
     const m = new Map<string, { role: string; asked: number; replied: number; offers: number; secs: number[]; eur: number[] }>();
     for (const r of rows) {
-      const k = `${r.carrier}|${r.role}`;
+      const k = `${r.carrier}|`;  // one row per carrier, whatever kind of bid we asked for
       const x = m.get(k) ?? { role: r.role, asked: 0, replied: 0, offers: 0, secs: [], eur: [] };
+      if (r.role === "ratedesk" || r.role === "trucker") x.role = r.role;
       x.asked++;
       if (r.replied_at && r.status !== "send_failed") { x.replied++; if (r.requested_at) x.secs.push(r.replied_at - r.requested_at); }
       if (r.status === "ok" && Number(r.total_eur) > 0) { x.offers++; x.eur.push(Number(r.total_eur)); }
       m.set(k, x);
     }
-    return [...m.entries()].map(([k, x]) => ({ carrier: k.split("|")[0], role: x.role, asked: x.asked, replied: x.replied,
-      offers: x.offers, medianReplyS: median(x.secs), medianEur: median(x.eur) }))
-      .sort((a, b) => b.replied - a.replied || b.offers - a.offers).slice(0, 8);
+    // Patrick's reliability flags (monitor/carriers.py): red / amber carriers go first, with the reason.
+    const flags = new Map(getCarrierFlags().map((f) => [f.carrier, f]));
+    const rank = (f: string | null) => (f === "red" ? 0 : f === "amber" ? 1 : 2);
+    return [...m.entries()].map(([k, x]) => {
+      const f = flags.get(k.split("|")[0]);
+      const flag = f && (f.level === "red" || f.level === "amber") ? f.level : null;
+      return { carrier: k.split("|")[0], role: x.role, asked: x.asked, replied: x.replied,
+        offers: x.offers, medianReplyS: median(x.secs), medianEur: median(x.eur), flag, reasons: flag ? f!.reasons : [] };
+    })
+      .sort((a, b) => rank(a.flag) - rank(b.flag) || b.replied - a.replied || b.offers - a.offers).slice(0, 8);
   })();
 
   return {

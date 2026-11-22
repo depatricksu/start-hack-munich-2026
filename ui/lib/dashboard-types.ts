@@ -53,7 +53,7 @@ export type Shipment = {
 };
 
 export type LaneRow = { lane: string; quotes: number; asks: number; cheapest: number; medianOverPct: number | null };
-export type CarrierRow = { carrier: string; role: string; asked: number; replied: number; offers: number; medianReplyS: number | null; medianEur: number | null };
+export type CarrierRow = { carrier: string; role: string; asked: number; replied: number; offers: number; medianReplyS: number | null; medianEur: number | null; flag: string | null; reasons: string[] };
 export type CustomerRow = { customer: string; requests: number; quotes: number; won: number; languages: string[] };
 
 export type DashData = {

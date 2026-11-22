@@ -338,14 +338,22 @@ function Pricing({ d }: { d: DashData }) {
 
 function Carriers({ d }: { d: DashData }) {
   return (
-    <Panel title="Carriers" caption="bid requests by mail">
+    <Panel title="Carriers" caption="flagged first · price requests by mail">
       {d.carriers.length === 0 ? <p className="text-sm text-zinc-500">No bids asked yet.</p> : (
         <table className="w-full text-sm">
           <thead><tr><Th>Carrier</Th><Th right>Replied</Th><Th right>Median reply</Th><Th right>Median price</Th></tr></thead>
           <tbody>
             {d.carriers.map((c) => (
               <tr key={`${c.carrier}-${c.role}`} className="border-t border-line text-zinc-300">
-                <td className="max-w-[150px] py-1.5"><div className="truncate text-[13px]">{c.carrier}</div><div className="text-[10px] text-zinc-500">{c.role}</div></td>
+                <td className="max-w-[170px] py-1.5">
+                  <div className="flex items-center gap-1.5 truncate text-[13px]">
+                    {c.flag && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${c.flag === "red" ? "bg-red-400" : "bg-amber-400"}`} />}
+                    <span className="truncate">{c.carrier}</span>
+                  </div>
+                  <div className={`truncate text-[10px] ${c.flag === "red" ? "text-red-300" : c.flag ? "text-amber-300" : "text-zinc-500"}`} title={c.reasons.join(" · ")}>
+                    {c.flag ? c.reasons[0] : c.role === "ratedesk" ? "rate desk" : c.role}
+                  </div>
+                </td>
                 <td className="num text-right text-[13px]">{c.replied}<span className="text-zinc-600">/{c.asked}</span></td>
                 <td className="num text-right text-[13px]">{c.medianReplyS == null ? "—" : ago(c.medianReplyS)}</td>
                 <td className="num text-right text-[13px]">{c.medianEur == null ? "—" : `${n0(c.medianEur)} EUR`}</td>
