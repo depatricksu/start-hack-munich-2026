@@ -9,7 +9,7 @@ To add a feature, write a handler in your own folder and register it in HANDLERS
 """
 import csv, json, os, re, sys, time, traceback, urllib.error
 from decimal import Decimal
-from . import attachments, config, db, imports, mailbox, safety, offer_file, recall, scope
+from . import attachments, config, db, imports, lots, mailbox, safety, offer_file, recall, scope
 from router.route import route, lookalike, ADDRESS_SWITCH
 from llm import extract as llm
 from pricing import price as sheets, insurance, customs
@@ -100,6 +100,14 @@ def handle_rfq(mail):
     if not fields.get("origin") and postcode[:2] in ZONE_AIRPORT:
         fields["origin"] = ZONE_AIRPORT[postcode[:2]]
     weight, volume = shipment(fields)
+    try:                                                     # several lots listed line by line: the text is exact, add
+        exact = lots.totals(mail.get("body")) if len(fields.get("shipments") or []) <= 1 else None   # it up by code (5U 10:27)
+        if exact and (abs(exact[0] - weight) > 0.005 * exact[0] or abs(exact[1] - volume) > 0.01 * exact[1]):
+            db.event("lots_fix", tid, mail["id"], before=[weight, volume], after=list(exact))
+            fields["lots_fix"] = "weight %g -> %g kg, volume %g -> %g cbm (added up from the lots in the mail)" % (weight, exact[0], volume, exact[1])
+            weight, volume = exact
+    except Exception as e:                                   # an extra: never lose the request over it
+        db.event("error", tid, mail["id"], error="lots.totals: %s" % e)
     diff = dg.compare(dict(fields, weight_kg_total=weight, volume_cbm_total=volume), mail)   # attachment vs mail (Riky)
     if diff:
         disowned = dg.mail_disowns_attachment(mail.get("body"))   # "the attached packing list is outdated": the mail wins
