@@ -2,8 +2,8 @@
 
 Routes: rfq, follow_up, carrier_bid, tariff, ratedesk, tracking, booking_confirmation, own, spam
 
-spam: a new thread with spam/phishing words and no sign of a freight request, or a vendor's sales pitch with no
-shipment in it. It has no handler, so it is only saved and logged: no session, no needs_human, no reply. Kept strict
+spam: a new thread with spam/phishing words and no sign of a freight request, a vendor's sales pitch with no
+shipment in it, or a sender whose address imitates a customer we know (lookalike()). It has no handler, so it is only saved and logged: no session, no needs_human, no reply. Kept strict
 so a real RFQ is never dropped: when in doubt the mail stays "rfq", the gateway call reads it, and a mail that is not
 clearly a freight request ends in needs_human for a person to decide.
 """
@@ -41,7 +41,51 @@ BOUNCE_SUBJECT = re.compile(r"undelivered mail|undeliverable|delivery status not
                             r"returned mail|delivery failure|failure notice|nicht zustellbar|unzustellbar", re.I)
 
 
-def route(mail, our_address="google@hackloop.mail"):
+# 5U, 22 Nov 02:32: "our usual mailbox has been down since this morning ... could you confirm your price for our shipment
+# to Bangkok to this address" from nordlicht.audio@hackloop.mail. Our customer is nordlicht-audio@hackloop.mail (a hyphen).
+# A sender that is almost, but not exactly, a customer we know is an impostor: no reply, no price, nothing from the
+# real customer's history.
+_SWAP = str.maketrans({"0": "o", "1": "l", "i": "l", "5": "s", "3": "e", "4": "a", "7": "t", "8": "b"})
+
+
+def _canon(part):
+    return re.sub(r"[._\-+]", "", part.lower()).replace("rn", "m").replace("vv", "w").translate(_SWAP)
+
+
+def _distance(a, b, cap=3):
+    """Edit distance, capped (small strings: a plain table is enough)."""
+    if abs(len(a) - len(b)) >= cap:
+        return cap
+    prev = list(range(len(b) + 1))
+    for i, x in enumerate(a, 1):
+        cur = [i]
+        for j, y in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (x != y)))
+        prev = cur
+    return min(prev[-1], cap)
+
+
+def lookalike(sender, known):
+    """-> the known customer address this sender imitates, or None. Exactly a known address is never an imitation."""
+    sender = (sender or "").lower()
+    known = {k.lower() for k in known or () if k}
+    if "@" not in sender or sender in known:
+        return None
+    local, domain = sender.rsplit("@", 1)
+    for k in sorted(known):
+        if "@" not in k:
+            continue
+        kl, kd = k.rsplit("@", 1)
+        same_name = _canon(local) == _canon(kl)
+        numbered = re.sub(r"\d", "", local) == re.sub(r"\d", "", kl)       # buyer1@ and buyer2@ are two mailboxes, not a fake
+        if domain == kd and (same_name or (len(kl) >= 8 and not numbered and _distance(local, kl) == 1)):
+            return k                                         # nordlicht.audio@ / nordlicht-audi0@ / nordlich-audio@ for nordlicht-audio@
+        if domain != kd and same_name and len(kl) >= 6 and len(kd) >= 8 and (_canon(domain) == _canon(kd) or _distance(domain, kd) <= 2):
+            return k                                         # the same name on hackl00p.mail or hackloop.mall
+    return None
+
+
+def route(mail, our_address="google@hackloop.mail", customers=None):
     sender, subject = mail["sender"], mail["subject"].lower()
     if sender == our_address:
         return "own"
@@ -61,6 +105,8 @@ def route(mail, our_address="google@hackloop.mail"):
         return "carrier_bid"
     # anyone else is a customer
     if mail["is_thread_start"]:
+        if lookalike(sender, customers):                     # an address that imitates a customer we know: never a reply
+            return "spam"
         text = mail["subject"] + "\n" + mail["body"]
         if SPAM.search(text) and not FREIGHT.search(text):
             return "spam"
