@@ -18,8 +18,10 @@ export class ChatError extends Error {
   }
 }
 
+// Not "strict": strict mode refuses a schema unless every property is required and extras are forbidden, and a
+// refused schema is a 400 on the very first question. Plain function calling takes any JSON schema.
 export function openaiTools(defs: ToolDef[]) {
-  return defs.map((d) => ({ type: "function", function: { name: d.name, description: d.description, parameters: d.input_schema, strict: true } }));
+  return defs.map((d) => ({ type: "function", function: { name: d.name, description: d.description, parameters: d.input_schema } }));
 }
 
 // One short sentence per failure. `body` is only read for a machine code, never shown.
