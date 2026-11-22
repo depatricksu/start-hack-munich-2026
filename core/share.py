@@ -10,7 +10,7 @@ SHARE_EVERY_S seconds (default 15 min) when it runs live (DRY_RUN=0).
 
 Use it:  DB_PATH=examples/real/snapshot.db python3 -m core.stats      python3 -m core.replay
 """
-import os, shutil, sqlite3, subprocess, sys, threading, time
+import os, shutil, sqlite3, subprocess, sys, tempfile, threading, time
 from . import config, db
 
 RELEASE = "runner-data"
@@ -22,16 +22,41 @@ def _gh(*args):
     return subprocess.run(["gh"] + list(args), cwd=config.ROOT, capture_output=True, text=True, timeout=120)
 
 
-def snapshot(path=SNAPSHOT):
-    """A consistent copy of the live DB. Safe while the clerk writes (SQLite backup API)."""
-    if os.path.exists(path):
+def healthy(path):
+    """True when the file is one complete SQLite database (nothing waiting in a -wal next to it)."""
+    try:
+        c = sqlite3.connect("file:%s?mode=ro" % path, uri=True)
+        try:
+            return c.execute("PRAGMA quick_check").fetchone()[0] == "ok" and c.execute("SELECT COUNT(*) FROM mails").fetchone() is not None
+        finally:
+            c.close()
+    except sqlite3.Error:
+        return False
+
+
+def snapshot(path=None):
+    """A consistent copy of the live DB. Safe while the clerk writes (SQLite backup API).
+
+    Every call writes into its OWN new folder: two uploaders (the supervisor's thread and a manual run) used to share
+    data/snapshot.db, and anything that opened that file could keep pages in a -wal that was never uploaded. The copy
+    is checked before it is handed out; a copy that does not pass is never uploaded."""
+    if path is None:
+        path = os.path.join(tempfile.mkdtemp(prefix="share-", dir=os.path.dirname(config.DB_PATH)), "snapshot.db")
+    elif os.path.exists(path):
         os.remove(path)
+    for leftover in (path + "-wal", path + "-shm", path + "-journal"):
+        if os.path.exists(leftover):
+            os.remove(leftover)
     src, dst = sqlite3.connect(config.DB_PATH), sqlite3.connect(path)
-    with dst:
-        src.backup(dst)
-    dst.execute("PRAGMA journal_mode=DELETE")                # one self-contained file, no -wal next to it
-    src.close()
-    dst.close()
+    try:
+        with dst:
+            src.backup(dst)
+        mode = dst.execute("PRAGMA journal_mode=DELETE").fetchone()[0]   # one self-contained file, no -wal next to it
+    finally:
+        src.close()
+        dst.close()
+    if str(mode).lower() != "delete" or os.path.exists(path + "-wal") or not healthy(path):
+        raise RuntimeError("snapshot at %s is not a complete database (journal mode %s): not uploaded" % (path, mode))
     return path
 
 
@@ -39,28 +64,55 @@ def upload():
     if not shutil.which("gh"):
         raise RuntimeError("gh (GitHub CLI) is not installed")
     path = snapshot()
-    if _gh("release", "view", RELEASE).returncode != 0:
-        r = _gh("release", "create", RELEASE, "--title", "Runner data", "--prerelease", "--notes",
-                "Snapshot of the live clerk database, replaced every few minutes. Get it: python3 -m core.share --get")
+    try:
+        if _gh("release", "view", RELEASE).returncode != 0:
+            r = _gh("release", "create", RELEASE, "--title", "Runner data", "--prerelease", "--notes",
+                    "Snapshot of the live clerk database, replaced every few minutes. Get it: python3 -m core.share --get")
+            if r.returncode != 0:
+                raise RuntimeError("could not create the release: " + r.stderr.strip()[:300])
+        r = _gh("release", "upload", RELEASE, path, "--clobber")
         if r.returncode != 0:
-            raise RuntimeError("could not create the release: " + r.stderr.strip()[:300])
-    r = _gh("release", "upload", RELEASE, path, "--clobber")
-    if r.returncode != 0:
-        raise RuntimeError("upload failed: " + r.stderr.strip()[:300])
-    return os.path.getsize(path)
+            raise RuntimeError("upload failed: " + r.stderr.strip()[:300])
+        return os.path.getsize(path)
+    finally:
+        shutil.rmtree(os.path.dirname(path), ignore_errors=True)   # the private folder of this one upload
 
 
-def get():
+def get(tries=4, wait_s=6):
+    """Download the runner's snapshot. It is checked in a folder of its own BEFORE it replaces the local copy, and it
+    replaces it as a new file. 22 Nov 11:15: 'database disk image is malformed' on the other laptops, also after a
+    second download, while the file on GitHub was intact (seven downloads in a row passed). A program that still had
+    the old examples/real/snapshot.db open (control room, monitor.carriers --watch: core.db puts every DB it opens into
+    WAL mode) wrote its old pages into the file that the download had overwritten in place."""
     os.makedirs(os.path.dirname(LOCAL), exist_ok=True)
-    r = _gh("release", "download", RELEASE, "-p", "snapshot.db", "-D", os.path.dirname(LOCAL), "--clobber")
-    if r.returncode != 0:
-        sys.exit("No snapshot yet (%s). The runner uploads one with: python3 -m core.share" % r.stderr.strip()[:200])
-    age = time.time() - os.path.getmtime(LOCAL)
-    c = sqlite3.connect(LOCAL)
-    n = c.execute("SELECT COUNT(*), MAX(received_at) FROM mails").fetchone()
-    print("Saved %s (%d mails, newest mail %s). Use: DB_PATH=%s python3 -m core.stats" % (
-        os.path.relpath(LOCAL, config.ROOT), n[0],
-        time.strftime("%H:%M:%S", time.localtime(n[1])) if n[1] else "none", os.path.relpath(LOCAL, config.ROOT)))
+    last = ""
+    for attempt in range(tries):
+        tmp = tempfile.mkdtemp(prefix=".snapshot-get-", dir=os.path.dirname(LOCAL))   # same disk: the move is one rename
+        try:
+            r = _gh("release", "download", RELEASE, "-p", "snapshot.db", "-D", tmp, "--clobber")
+            new = os.path.join(tmp, "snapshot.db")
+            if r.returncode != 0 or not os.path.exists(new):
+                last = "download failed: %s" % (r.stderr.strip()[:200] or "no file")      # the runner replaces it every minute
+            elif not healthy(new):
+                last = "the downloaded file is not a complete database (the runner was replacing it)"
+            else:
+                for leftover in (LOCAL + "-wal", LOCAL + "-shm", LOCAL + "-journal"):       # of an older copy: never mix them
+                    if os.path.exists(leftover):
+                        os.remove(leftover)
+                os.replace(new, LOCAL)                                                       # a NEW file, never written in place
+                c = sqlite3.connect("file:%s?mode=ro" % LOCAL, uri=True)
+                n = c.execute("SELECT COUNT(*), MAX(received_at) FROM mails").fetchone()
+                c.close()
+                print("Saved %s (%d mails, newest mail %s). Use: DB_PATH=%s python3 -m core.stats" % (
+                    os.path.relpath(LOCAL, config.ROOT), n[0],
+                    time.strftime("%H:%M:%S", time.localtime(n[1])) if n[1] else "none", os.path.relpath(LOCAL, config.ROOT)))
+                print("If a control room or `monitor.carriers --watch` is running on this copy, restart it now: it still shows the old file.")
+                return LOCAL
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        if attempt + 1 < tries:
+            time.sleep(wait_s)
+    sys.exit("No usable snapshot after %d tries (%s). Your old copy was not touched. The runner uploads with: python3 -m core.share" % (tries, last))
 
 
 def start_background():
