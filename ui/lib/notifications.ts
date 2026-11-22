@@ -1,5 +1,5 @@
 // Big problems only, read-only from the runner DB: flight delay, offload, airline cancellation, price jump at booking,
-// a request that needs a person or was missed, agent stopped. Everyday progress (quotes, bids, confirmations) never notifies.
+// a request the clerk stopped on or missed, agent stopped. Everyday progress (quotes, bids, confirmations) never notifies.
 import fs from "node:fs";
 import path from "node:path";
 import { mailAlert } from "./alert-rules";
@@ -68,7 +68,7 @@ export function getNotifications(now = Date.now() / 1000): Notice[] {
       id: `mail-${m.id}-${Math.floor(ts)}`, ts, severity: hit.type === "delayed" ? "warning" : "critical",
       title: TITLE[hit.type], detail: hit.sentence, context: b ? `${b.lane}${b.ref ? ` · ${b.ref}` : ""}` : "No shipment matched",
       action: told ? "Customer informed" : b ? "Customer not told yet" : "Find the shipment",
-      href: b ? `/requests?id=${b.thread}` : "/carriers",
+      href: b ? `/v2/requests?id=${b.thread}` : "/v2/shipments",
       simulated: parse<{ simulated?: boolean }>(m.raw, {}).simulated === true,
     });
   }
@@ -84,7 +84,7 @@ export function getNotifications(now = Date.now() / 1000): Notice[] {
       title: cancelled ? TITLE.cancelled : "Booked above our quote",
       detail: cancelled ? "The shipment has no flight." : `Quoted ${d.quoted_total ?? "?"}, now ${d.new_total ?? "?"}.`,
       context: b?.lane ?? `Request ${thread}`, action: cancelled ? "Rebook" : "Customer must agree",
-      href: `/requests?id=${thread}`,
+      href: `/v2/requests?id=${thread}`,
     });
   }
 
@@ -98,9 +98,9 @@ export function getNotifications(now = Date.now() / 1000): Notice[] {
     const missed = s.status === "expired", failed = s.status === "failed" || note.startsWith("error:");
     out.push({
       id: `status-${thread}-${s.status}-${Math.floor(ts)}`, ts, severity: missed || failed ? "critical" : "warning",
-      title: missed ? "Request missed" : failed ? "Something went wrong" : "Needs a person",
+      title: missed ? "Request missed" : failed ? "Something went wrong" : "Request stopped",
       detail: note.slice(0, 170) || "The agent could not finish this request.",
-      context: byThread.get(thread)?.lane ?? String(s.customer ?? ""), action: "Take a look", href: `/requests?id=${thread}`,
+      context: byThread.get(thread)?.lane ?? String(s.customer ?? ""), action: "Take a look", href: `/v2/requests?id=${thread}`,
     });
   }
 
@@ -110,7 +110,7 @@ export function getNotifications(now = Date.now() / 1000): Notice[] {
     if (beat && now - beat > SILENT_S) out.push({
       id: `stopped-${Math.floor(beat)}`, ts: beat + SILENT_S, severity: "critical", title: "Agent stopped",
       detail: "No heartbeat for more than 2 minutes. Mails are not being answered.", context: "Relay", action: "Check the runner",
-      href: "/dashboard",
+      href: "/v2",
     });
   }
 

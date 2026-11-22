@@ -1,5 +1,6 @@
 "use client";
 // Bell and pop-ups, top right on every page. lib/notifications.ts decides what is big enough to show up here.
+// `inline`: the bell sits inside the Relay v2 top bar (components/v2/shell.tsx) instead of in a bar of its own.
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
@@ -41,7 +42,7 @@ function Body({ n, now }: { n: Notice; now: number }) {
   );
 }
 
-export function Notifications() {
+export function Notifications({ inline = false }: { inline?: boolean }) {
   const [items, setItems] = useState<Notice[]>([]);
   const [seen, setSeen] = useState<string[]>([]);
   const [pop, setPop] = useState<string[]>([]);
@@ -89,11 +90,13 @@ export function Notifications() {
   const toasts = open ? [] : unread.filter((n) => pop.includes(n.id)).slice(0, POP_MAX);
 
   return (
-    <div ref={box} className="relative z-50 flex h-12 shrink-0 items-center justify-end px-3">
+    <div ref={box} className={inline ? "relative z-50 flex items-center" : "relative z-50 flex h-12 shrink-0 items-center justify-end px-3"}>
       <button onClick={() => setOpen((v) => !v)} aria-expanded={open}
         aria-label={`Notifications, ${unread.length} unread`}
-        className="relative flex h-9 w-9 items-center justify-center rounded-xl glass text-zinc-300 hover:text-white">
-        <Bell size={17} aria-hidden />
+        className={inline
+          ? "relative flex h-7 w-7 items-center justify-center rounded-full border border-[var(--hair-2)] text-[var(--fg-2)] transition-colors hover:text-[var(--fg)]"
+          : "relative flex h-9 w-9 items-center justify-center rounded-xl glass text-zinc-300 hover:text-white"}>
+        <Bell size={inline ? 14 : 17} aria-hidden />
         {unread.length > 0 && (
           <span className="num absolute -right-1 -top-1 min-w-4 rounded-full bg-red-500 px-1 text-center text-[10px] font-semibold leading-4 text-white">
             {unread.length > 9 ? "9+" : unread.length}
@@ -103,7 +106,7 @@ export function Notifications() {
 
       {open && (
         <section aria-label="Notifications"
-          className="absolute right-3 top-12 w-[380px] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-2xl border border-white/10 bg-[#141518] shadow-2xl">
+          className={`absolute ${inline ? "right-0 top-10" : "right-3 top-12"} w-[380px] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-2xl border border-white/10 bg-[#141518] shadow-2xl`}>
           <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
             <h2 className="text-sm font-semibold text-white">Big problems <span className="font-normal text-zinc-500">last 24 h</span></h2>
             {unread.length > 0 && (
@@ -111,7 +114,7 @@ export function Notifications() {
             )}
           </div>
           <div className="rail max-h-[70vh] overflow-y-auto">
-            {items.length === 0 && <p className="px-4 py-8 text-center text-sm text-zinc-500">Nothing needs you.</p>}
+            {items.length === 0 && <p className="px-4 py-8 text-center text-sm text-zinc-500">No big problems.</p>}
             {items.map((n) => (
               <Link key={n.id} href={n.href} onClick={() => { markRead([n.id]); setOpen(false); }}
                 className={`block border-b border-white/5 p-4 hover:bg-white/5 ${seen.includes(n.id) ? "opacity-50" : ""}`}>
@@ -122,7 +125,7 @@ export function Notifications() {
         </section>
       )}
 
-      <div aria-live="assertive" className="pointer-events-none absolute right-3 top-12 flex w-[380px] max-w-[calc(100vw-1.5rem)] flex-col gap-2">
+      <div aria-live="assertive" className={`pointer-events-none absolute ${inline ? "right-0 top-10" : "right-3 top-12"} flex w-[380px] max-w-[calc(100vw-1.5rem)] flex-col gap-2`}>
         <AnimatePresence initial={false}>
           {toasts.map((n) => (
             <motion.div key={n.id} role="alert"
