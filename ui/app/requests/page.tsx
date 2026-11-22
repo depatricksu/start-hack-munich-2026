@@ -153,6 +153,86 @@ function Rail({ sessions, activeId, onSelect, newCount, onClearNew }: { sessions
   );
 }
 
+// ---------- The thread: who said what, when ----------
+
+// Who a mail is from, read off the runner's route. The customer is on the left, we are on the right,
+// everyone else (carriers, rate desk, booking and tracking notices) sits in between as a slim note.
+const WHO: Record<string, { label: string; side: "customer" | "other" }> = {
+  rfq: { label: "Customer", side: "customer" }, follow_up: { label: "Customer", side: "customer" },
+  carrier_bid: { label: "Carrier", side: "other" }, ratedesk: { label: "Rate desk", side: "other" },
+  tariff: { label: "Tariff", side: "other" }, booking_confirmation: { label: "Booking", side: "other" },
+  tracking: { label: "Tracking", side: "other" }, spam: { label: "Spam", side: "other" },
+};
+
+function clock(ts: number): string {
+  return new Date(ts * 1000).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+function since(ts: number, start: number): string {
+  const s = Math.round(ts - start);
+  if (s <= 0) return "";
+  return s < 120 ? `+${s} s` : s < 7200 ? `+${Math.round(s / 60)} min` : `+${Math.round(s / 3600)} h`;
+}
+
+function Body({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const long = text.length > 420 || text.split("\n").length > 7;
+  return (
+    <>
+      <div className={`whitespace-pre-wrap break-words ${long && !open ? "line-clamp-6" : ""}`}>{text.trim()}</div>
+      {long && (
+        <button onClick={() => setOpen(!open)} className="mt-1.5 text-xs font-medium text-zinc-400 hover:text-white">
+          {open ? "Show less" : "Show the whole mail"}
+        </button>
+      )}
+    </>
+  );
+}
+
+function Thread({ d }: { d: SessionDetail }) {
+  type Item = { key: string; ts: number; side: "customer" | "other" | "us"; label: string; sender: string; body: string; files?: FileRef[] };
+  const items: Item[] = d.mails.map((m) => {
+    const w = WHO[m.route ?? ""] ?? (m.sender === d.customer ? WHO.rfq : { label: "Mail", side: "other" as const });
+    return { key: `m${m.id}`, ts: m.received_at, side: w.side, label: w.label, sender: m.sender, body: m.body, files: m.files };
+  });
+  if (d.reply) {
+    const last = items.length ? items[items.length - 1].ts : d.received_at;
+    items.push({ key: "reply", ts: d.quoted_at ?? last + 0.001, side: "us", label: "Our reply", sender: "sent by Relay", body: d.reply, files: d.reply_files });
+  }
+  items.sort((x, y) => x.ts - y.ts);
+  const start = items.length ? items[0].ts : d.received_at;
+  return (
+    <details open className="group rounded-2xl glass-2 p-5">
+      <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-semibold text-white [&::-webkit-details-marker]:hidden">
+        <span>Thread <span className="num font-normal text-zinc-500">{items.length}</span></span>
+        <ChevronDown size={16} className="text-zinc-500 transition group-open:rotate-180" />
+      </summary>
+      <ol className="mt-4 space-y-3">
+        {items.map((it) => {
+          const us = it.side === "us", other = it.side === "other";
+          return (
+            <li key={it.key} className={`flex ${us ? "justify-end" : "justify-start"}`}>
+              <div className={`min-w-0 text-sm ${us ? "max-w-[88%] rounded-2xl rounded-br-md bg-white/[0.09] p-3.5 text-zinc-100 ring-1 ring-inset ring-white/15"
+                : other ? "w-full rounded-xl border-l-2 border-white/15 bg-white/[0.02] py-2 pl-3.5 pr-3 text-[13px] text-zinc-400"
+                : "max-w-[88%] rounded-2xl rounded-bl-md bg-white/[0.04] p-3.5 text-zinc-200 ring-1 ring-inset ring-white/8"}`}>
+                <div className="mb-1.5 flex items-baseline gap-2 text-xs">
+                  <span className={`font-semibold ${us ? "text-white" : other ? "text-zinc-300" : "text-zinc-200"}`}>{it.label}</span>
+                  <span className="min-w-0 truncate text-zinc-500">{it.sender}</span>
+                  <span className="num ml-auto shrink-0 pl-2 text-zinc-500" title={new Date(it.ts * 1000).toLocaleString("en-GB")}>
+                    {clock(it.ts)}{since(it.ts, start) && <span className="ml-1.5 text-zinc-600">{since(it.ts, start)}</span>}
+                  </span>
+                </div>
+                <Body text={it.body} />
+                <FileChips files={it.files} />
+              </div>
+            </li>
+          );
+        })}
+        {items.length === 0 && <li className="text-sm text-zinc-500">No mail in this thread yet.</li>}
+      </ol>
+    </details>
+  );
+}
+
 // ---------- Centre: the facts ----------
 
 function Fact({ k, v, warn }: { k: string; v: string; warn?: boolean }) {
@@ -263,28 +343,7 @@ function Facts({ d }: { d: SessionDetail }) {
         <OptionsTable options={d.options} chosen={d.chosen} />
       </section>
 
-      <details className="group rounded-2xl glass-2 p-5">
-        <summary className="flex cursor-pointer list-none items-center justify-between text-sm font-semibold text-white [&::-webkit-details-marker]:hidden">
-          <span>Thread <span className="num font-normal text-zinc-500">{d.mails.length}</span></span>
-          <ChevronDown size={16} className="text-zinc-500 transition group-open:rotate-180" />
-        </summary>
-        <div className="mt-3 space-y-3">
-          {d.mails.map((m) => (
-            <div key={m.id} className="rounded-xl bg-white/[0.03] p-3 text-sm text-zinc-200 ring-1 ring-inset ring-white/8">
-              <div className="mb-1 text-xs text-zinc-500">{m.sender}</div>
-              <div className="whitespace-pre-wrap">{m.body}</div>
-              <FileChips files={m.files} />
-            </div>
-          ))}
-          {d.reply && (
-            <div className="ml-8 rounded-xl bg-white/[0.06] p-3 text-sm text-zinc-100 ring-1 ring-inset ring-white/12">
-              <div className="mb-1 text-xs font-medium text-zinc-300">Our reply</div>
-              <div className="whitespace-pre-wrap">{d.reply}</div>
-              <FileChips files={d.reply_files} />
-            </div>
-          )}
-        </div>
-      </details>
+      <Thread d={d} />
     </div>
   );
 }

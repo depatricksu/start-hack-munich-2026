@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { motion } from "motion/react";
-import { Inbox, LayoutGrid, X } from "lucide-react";
+import { Inbox, LayoutGrid, User, X } from "lucide-react";
 import { RelayMark, SidebarToggleIcon } from "@/components/logo";
 import { Session } from "@/lib/types";
 
@@ -126,7 +126,7 @@ export function Sidebar() {
       {/* clickable account */}
       <button onClick={() => setAcct((o) => !o)}
         className={`mt-auto flex items-center gap-2.5 rounded-xl px-2 py-2 text-left transition hover:bg-white/5 ${acct ? "glass-2" : ""} ${open ? "" : "justify-center px-0"}`}>
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full glass-2 text-sm font-semibold text-white">R</span>
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full glass-2 text-zinc-200"><User size={17} strokeWidth={1.8} aria-hidden /></span>
         {open && (
           <div className="flex-1 leading-tight">
             <div className="text-sm font-medium">Relay ops</div>
