@@ -42,7 +42,10 @@ function total(f: Session["fields"], key: "weight_kg" | "volume_cbm", unit: stri
     const sum = Math.round(parts.reduce((a, b) => a + b, 0) * 100) / 100;
     return `${sum} ${unit} (${parts.join(" + ")})`;
   }
-  return f[key] != null ? `${f[key]} ${unit}` : "?";
+  // the total the clerk priced; the model's own field can be one lot of several (request 55122: 1014 of 1898 kg)
+  const priced = key === "weight_kg" ? f.weight_kg_total : f.volume_cbm_total;
+  const value = priced ?? f[key];
+  return value != null ? `${Math.round(Number(value) * 100) / 100} ${unit}` : "?";
 }
 
 function Route({ s }: { s: Session }) {

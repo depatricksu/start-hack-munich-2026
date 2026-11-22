@@ -19,8 +19,11 @@ export type Fields = {
   origin?: string | null;
   destination?: string | null;
   pickup_postcode?: string | null;
-  weight_kg?: number | null;
+  weight_kg?: number | null;                 // what the model read; can be one lot of several
   volume_cbm?: number | null;
+  weight_kg_total?: number | null;           // what the clerk priced, after its own checks: show this one
+  volume_cbm_total?: number | null;
+  lots_fix?: string | null;                  // set when the lots in the mail were added up by code
   prefer?: "cheapest" | "fastest";
   language?: string | null;
   missing?: string[];
